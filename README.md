@@ -5,11 +5,16 @@ Ported from https://github.com/open-mmlab/mmediting
 
 
 ## Dependencies
-- [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit-archive), required by `mmcv-full` to compile CUDA ops. Install the same version as in `PyTorch`.
 - [mmcv-full](https://github.com/open-mmlab/mmcv#installation)
 - [NumPy](https://numpy.org/install)
 - [PyTorch](https://pytorch.org/get-started), preferably with CUDA. Note that `torchaudio` is not required and hence can be omitted from the command.
 - [VapourSynth](http://www.vapoursynth.com/)
+
+Installing `mmcv-full` on Windows is a bit complicated as it requires Visual Studio and other tools to compile CUDA ops.
+So I have uploaded the built file compiled with CUDA 11.1 for Windows users and you can install it by executing the following command.
+```
+pip install https://github.com/HolyWu/vs-basicvsrpp/releases/download/v1.0.0/mmcv_full-1.3.12-cp39-cp39-win_amd64.whl
+```
 
 
 ## Installation
