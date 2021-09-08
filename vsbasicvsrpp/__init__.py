@@ -137,14 +137,14 @@ def BasicVSRPP(clip: vs.VideoNode, model: int=1, interval: int=30, tile_x: int=0
 
 
 def frame_to_tensor(f: vs.VideoFrame) -> torch.Tensor:
-    arr = np.stack([np.asarray(f.get_read_array(plane)) for plane in range(f.format.num_planes)])
+    arr = np.stack([np.asarray(f.get_read_array(plane) if vs.__api_version__.api_major < 4 else f[plane]) for plane in range(f.format.num_planes)])
     return torch.from_numpy(arr)
 
 
 def ndarray_to_frame(arr: np.ndarray, f: vs.VideoFrame) -> vs.VideoFrame:
     fout = f.copy()
     for plane in range(fout.format.num_planes):
-        np.copyto(np.asarray(fout.get_write_array(plane)), arr[plane, :, :])
+        np.copyto(np.asarray(fout.get_write_array(plane) if vs.__api_version__.api_major < 4 else fout[plane]), arr[plane, :, :])
     return fout
 
 
