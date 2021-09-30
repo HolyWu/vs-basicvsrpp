@@ -1,16 +1,20 @@
 import math
+import os
+
 import mmcv
 import numpy as np
-import os
 import torch
 import vapoursynth as vs
+
 from .basicvsr import BasicVSR
 from .basicvsr_pp import BasicVSRPlusPlus
 from .builder import build_model
 
+vs_api_below4 = vs.__api_version__.api_major < 4
 
-def BasicVSRPP(clip: vs.VideoNode, model: int=1, interval: int=30, tile_x: int=0, tile_y: int=0, tile_pad: int=16,
-               device_type: str='cuda', device_index: int=0, fp16: bool=False) -> vs.VideoNode:
+
+def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: int = 0, tile_y: int = 0, tile_pad: int = 16,
+               device_type: str = 'cuda', device_index: int = 0, fp16: bool = False) -> vs.VideoNode:
     '''
     BasicVSR++: Improving Video Super-Resolution with Enhanced Propagation and Alignment
 
@@ -101,9 +105,7 @@ def BasicVSRPP(clip: vs.VideoNode, model: int=1, interval: int=30, tile_x: int=0
     cache = {}
 
     def basicvsrpp(n: int, f: vs.VideoFrame) -> vs.VideoFrame:
-        nonlocal cache
-
-        if str(n) not in cache.keys():
+        if str(n) not in cache:
             cache.clear()
 
             imgs = [frame_to_tensor(f[0])]
@@ -130,29 +132,28 @@ def BasicVSRPP(clip: vs.VideoNode, model: int=1, interval: int=30, tile_x: int=0
             del imgs
             torch.cuda.empty_cache()
 
-        return ndarray_to_frame(cache[str(n)], f[1])
+        return ndarray_to_frame(cache[str(n)], f[1].copy())
 
     new_clip = clip.std.BlankClip(width=clip.width * scale, height=clip.height * scale)
     return new_clip.std.ModifyFrame(clips=[clip, new_clip], selector=basicvsrpp)
 
 
 def frame_to_tensor(f: vs.VideoFrame) -> torch.Tensor:
-    arr = np.stack([np.asarray(f.get_read_array(plane) if vs.__api_version__.api_major < 4 else f[plane]) for plane in range(f.format.num_planes)])
+    arr = np.stack([np.asarray(f.get_read_array(plane) if vs_api_below4 else f[plane]) for plane in range(f.format.num_planes)])
     return torch.from_numpy(arr)
 
 
 def ndarray_to_frame(arr: np.ndarray, f: vs.VideoFrame) -> vs.VideoFrame:
-    fout = f.copy()
-    for plane in range(fout.format.num_planes):
-        np.copyto(np.asarray(fout.get_write_array(plane) if vs.__api_version__.api_major < 4 else fout[plane]), arr[plane, :, :])
-    return fout
+    for plane in range(f.format.num_planes):
+        np.copyto(np.asarray(f.get_write_array(plane) if vs_api_below4 else f[plane]), arr[plane, :, :])
+    return f
 
 
 def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_pad: int, model: BasicVSR) -> torch.Tensor:
-    batch, num, channel, height, width = img.shape
+    batch, num_imgs, channel, height, width = img.shape
     output_height = height * scale
     output_width = width * scale
-    output_shape = (batch, num, channel, output_height, output_width)
+    output_shape = (batch, num_imgs, channel, output_height, output_width)
 
     # start with black image
     output = img.new_zeros(output_shape)
