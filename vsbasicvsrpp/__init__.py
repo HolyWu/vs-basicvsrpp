@@ -67,6 +67,9 @@ def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: i
     if device_type == 'cuda' and not torch.cuda.is_available():
         raise vs.Error('BasicVSR++: CUDA is not available')
 
+    if os.path.getsize(os.path.join(os.path.dirname(__file__), 'basicvsr_plusplus_reds4.pth')) == 0:
+        raise vs.Error("BasicVSR++: model files have not been downloaded. run 'python -m vsbasicvsrpp' first")
+
     device = torch.device(device_type, device_index)
     if device_type == 'cuda':
         torch.backends.cudnn.enabled = True
