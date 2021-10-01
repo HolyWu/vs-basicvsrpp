@@ -107,6 +107,7 @@ def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: i
 
     cache = {}
 
+    @torch.inference_mode()
     def basicvsrpp(n: int, f: vs.VideoFrame) -> vs.VideoFrame:
         if str(n) not in cache:
             cache.clear()
@@ -122,11 +123,10 @@ def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: i
             if fp16:
                 imgs = imgs.half()
 
-            with torch.no_grad():
-                if tile_x > 0 and tile_y > 0:
-                    output = tile_process(imgs, scale, tile_x, tile_y, tile_pad, model)
-                else:
-                    output = model(imgs)
+            if tile_x > 0 and tile_y > 0:
+                output = tile_process(imgs, scale, tile_x, tile_y, tile_pad, model)
+            else:
+                output = model(imgs)
 
             output = output.squeeze(0).detach().cpu().numpy()
             for i in range(output.shape[0]):
