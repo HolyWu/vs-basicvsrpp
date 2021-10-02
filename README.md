@@ -13,7 +13,7 @@ Ported from https://github.com/open-mmlab/mmediting
 Installing `mmcv-full` on Windows is a bit complicated as it requires Visual Studio and other tools to compile CUDA ops.
 So I have uploaded the built file compiled with CUDA 11.1 for Windows users and you can install it by executing the following command.
 ```
-pip install https://github.com/HolyWu/vs-basicvsrpp/releases/download/v1.0.0/mmcv_full-1.3.12-cp39-cp39-win_amd64.whl
+pip install --upgrade https://github.com/HolyWu/vs-basicvsrpp/releases/download/v1.0.0/mmcv_full-1.3.14-cp39-cp39-win_amd64.whl
 ```
 
 
