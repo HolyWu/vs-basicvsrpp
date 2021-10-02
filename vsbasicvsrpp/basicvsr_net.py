@@ -127,7 +127,8 @@ class SPyNet(nn.Module):
                     input=flow,
                     scale_factor=2,
                     mode='bilinear',
-                    align_corners=True) * 2.0
+                    align_corners=True,
+                    recompute_scale_factor=False) * 2.0
 
             # add the residue to the upsampled flow
             flow = flow_up + self.basic_module[level](

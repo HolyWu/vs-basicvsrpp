@@ -291,8 +291,11 @@ class BasicVSRPlusPlus(nn.Module):
             lqs_downsample = lqs.clone()
         else:
             lqs_downsample = F.interpolate(
-                lqs.view(-1, c, h, w), scale_factor=0.25,
-                mode='bicubic').view(n, t, c, h // 4, w // 4)
+                lqs.view(-1, c, h, w),
+                scale_factor=0.25,
+                mode='bicubic',
+                align_corners=False,
+                recompute_scale_factor=False).view(n, t, c, h // 4, w // 4)
 
         feats = {}
         # compute spatial features
