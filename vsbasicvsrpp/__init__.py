@@ -14,7 +14,7 @@ vs_api_below4 = vs.__api_version__.api_major < 4
 
 
 def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: int = 0, tile_y: int = 0, tile_pad: int = 16,
-               device_type: str = 'cuda', device_index: int = 0, fp16: bool = False) -> vs.VideoNode:
+               device_type: str = 'cuda', device_index: int = 0, fp16: bool = False, cpu_cache: bool = False) -> vs.VideoNode:
     '''
     BasicVSR++: Improving Video Super-Resolution with Enhanced Propagation and Alignment
 
@@ -46,6 +46,8 @@ def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: i
         device_index: Device ordinal for the device type.
 
         fp16: fp16 mode for faster and more lightweight inference on cards with Tensor Cores.
+
+        cpu_cache: Whether to send the intermediate features to CPU. This saves GPU memory, but slows down the inference speed.
     '''
     if not isinstance(clip, vs.VideoNode):
         raise vs.Error('BasicVSR++: this is not a clip')
@@ -89,16 +91,20 @@ def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: i
         model_name = 'basicvsr_plusplus_ntire_decompress_track3.pth'
     model_path = os.path.join(os.path.dirname(__file__), model_name)
 
-    if model < 3:
-        config_name = 'config012.py'
-        scale = 4
-    else:
-        config_name = 'config345.py'
-        scale = 1
+    spynet_path = os.path.join(os.path.dirname(__file__), 'spynet.pth')
 
-    config = mmcv.Config.fromfile(os.path.join(os.path.dirname(__file__), config_name))
+    cfg = mmcv.Config(dict(type='BasicVSR',
+                           generator=dict(type='BasicVSRPlusPlus',
+                                          device=device,
+                                          mid_channels=64 if model < 3 else 128,
+                                          num_blocks=7 if model < 3 else 25,
+                                          is_low_res_input=True if model < 3 else False,
+                                          spynet_pretrained=spynet_path,
+                                          cpu_cache=cpu_cache if device_type == 'cuda' else False)))
 
-    model = build_model(config.model)
+    scale = 4 if model < 3 else 1
+
+    model = build_model(cfg._cfg_dict)
     mmcv.runner.load_checkpoint(model, model_path, strict=True)
     model.to(device)
     model.eval()

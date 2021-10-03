@@ -26,6 +26,7 @@ class BasicVSRPlusPlus(nn.Module):
         and Alignment
 
     Args:
+        device (torch.device): The destination GPU device.
         mid_channels (int, optional): Channel number of the intermediate
             features. Default: 64.
         num_blocks (int, optional): The number of residual blocks in each
@@ -37,25 +38,25 @@ class BasicVSRPlusPlus(nn.Module):
             resolution. Default: True.
         spynet_pretrained (str, optional): Pre-trained model path of SPyNet.
             Default: None.
-        cpu_cache_length (int, optional): When the length of sequence is larger
-            than this value, the intermediate features are sent to CPU. This
-            saves GPU memory, but slows down the inference speed. You can
-            increase this number if you have a GPU with large memory.
-            Default: 100.
+        cpu_cache (bool, optional): Whether to send the intermediate features
+            to CPU. This saves GPU memory, but slows down the inference speed.
+            Default: False.
     """
 
     def __init__(self,
+                 device,
                  mid_channels=64,
                  num_blocks=7,
                  max_residue_magnitude=10,
                  is_low_res_input=True,
                  spynet_pretrained=None,
-                 cpu_cache_length=100):
+                 cpu_cache=False):
 
         super().__init__()
+        self.device = device
         self.mid_channels = mid_channels
         self.is_low_res_input = is_low_res_input
-        self.cpu_cache_length = cpu_cache_length
+        self.cpu_cache = cpu_cache
 
         # optical flow
         self.spynet = SPyNet(pretrained=spynet_pretrained)
@@ -172,13 +173,13 @@ class BasicVSRPlusPlus(nn.Module):
         for i, idx in enumerate(frame_idx):
             feat_current = feats['spatial'][mapping_idx[idx]]
             if self.cpu_cache:
-                feat_current = feat_current.cuda()
-                feat_prop = feat_prop.cuda()
+                feat_current = feat_current.cuda(self.device)
+                feat_prop = feat_prop.cuda(self.device)
             # second-order deformable alignment
             if i > 0 and self.is_with_alignment:
                 flow_n1 = flows[:, flow_idx[i], :, :, :]
                 if self.cpu_cache:
-                    flow_n1 = flow_n1.cuda()
+                    flow_n1 = flow_n1.cuda(self.device)
 
                 cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
 
@@ -190,11 +191,11 @@ class BasicVSRPlusPlus(nn.Module):
                 if i > 1:  # second-order features
                     feat_n2 = feats[module_name][-2]
                     if self.cpu_cache:
-                        feat_n2 = feat_n2.cuda()
+                        feat_n2 = feat_n2.cuda(self.device)
 
                     flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
                     if self.cpu_cache:
-                        flow_n2 = flow_n2.cuda()
+                        flow_n2 = flow_n2.cuda(self.device)
 
                     flow_n2 = flow_n1 + flow_warp(flow_n2,
                                                   flow_n1.permute(0, 2, 3, 1))
@@ -212,7 +213,7 @@ class BasicVSRPlusPlus(nn.Module):
                 for k in feats if k not in ['spatial', module_name]
             ] + [feat_prop]
             if self.cpu_cache:
-                feat = [f.cuda() for f in feat]
+                feat = [f.cuda(self.device) for f in feat]
 
             feat = torch.cat(feat, dim=1)
             feat_prop = feat_prop + self.backbone[module_name](feat)
@@ -251,7 +252,7 @@ class BasicVSRPlusPlus(nn.Module):
             hr.insert(0, feats['spatial'][mapping_idx[i]])
             hr = torch.cat(hr, dim=1)
             if self.cpu_cache:
-                hr = hr.cuda()
+                hr = hr.cuda(self.device)
 
             hr = self.reconstruction(hr)
             hr = self.lrelu(self.upsample1(hr))
@@ -283,9 +284,6 @@ class BasicVSRPlusPlus(nn.Module):
         """
 
         n, t, c, h, w = lqs.size()
-
-        # whether to cache the features in CPU
-        self.cpu_cache = False  # True if t > self.cpu_cache_length else False
 
         if self.is_low_res_input:
             lqs_downsample = lqs.clone()

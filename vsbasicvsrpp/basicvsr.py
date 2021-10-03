@@ -36,9 +36,6 @@ class BasicVSR(nn.Module):
             lq (Tensor): LQ Tensor with shape (n, t, c, h, w).
 
         Returns:
-            dict: Output results.
+            Tensor: Output result.
         """
-        with torch.no_grad():
-            output = self.generator(lq)
-
-        return output
+        return self.generator(lq)
