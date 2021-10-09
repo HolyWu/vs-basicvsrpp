@@ -125,14 +125,14 @@ def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: i
                 imgs.append(frame_to_tensor(clip.get_frame(n + i)))
 
             imgs = torch.stack(imgs)
-            imgs = imgs.unsqueeze(0).to(device)
+            imgs = imgs.unsqueeze(0)
             if fp16:
                 imgs = imgs.half()
 
             if tile_x > 0 and tile_y > 0:
-                output = tile_process(imgs, scale, tile_x, tile_y, tile_pad, model)
+                output = tile_process(imgs, scale, tile_x, tile_y, tile_pad, device, model)
             else:
-                output = model(imgs)
+                output = model(imgs.to(device))
 
             output = output.squeeze(0).detach().cpu().numpy()
             for i in range(output.shape[0]):
@@ -158,7 +158,7 @@ def ndarray_to_frame(arr: np.ndarray, f: vs.VideoFrame) -> vs.VideoFrame:
     return f
 
 
-def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_pad: int, model: BasicVSR) -> torch.Tensor:
+def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_pad: int, device: torch.device, model: BasicVSR) -> torch.Tensor:
     batch, num_imgs, channel, height, width = img.shape
     output_height = height * scale
     output_width = width * scale
@@ -196,7 +196,7 @@ def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_p
             input_tile = img[:, :, :, input_start_y_pad:input_end_y_pad, input_start_x_pad:input_end_x_pad]
 
             # upscale tile
-            output_tile = model(input_tile)
+            output_tile = model(input_tile.to(device))
 
             # output tile area on total image
             output_start_x = input_start_x * scale
