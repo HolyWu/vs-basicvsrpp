@@ -11,10 +11,10 @@ Ported from https://github.com/open-mmlab/mmediting
 - [VapourSynth](http://www.vapoursynth.com/)
 
 Installing `mmcv-full` on Windows is a bit complicated as it requires Visual Studio and other tools to compile CUDA ops.
-So I have uploaded the built file compiled with CUDA 11.1 for Windows users and you can install it by executing the following command.
-```
-pip install --upgrade https://github.com/HolyWu/vs-basicvsrpp/releases/download/v1.0.0/mmcv_full-1.3.14-cp39-cp39-win_amd64.whl
-```
+So I have uploaded the built wheel at https://github.com/HolyWu/vs-basicvsrpp/releases/tag/v1.0.0 for easier installation.
+`mmcv_full-1.3.14-cp39-cp39-win_amd64.whl` is compiled with PyTorch 1.9 and CUDA 11.1.
+`mmcv_full-1.3.16-cp39-cp39-win_amd64.whl` is compiled with PyTorch 1.10 and CUDA 11.3.
+Install only one of them via `pip install --upgrade` as usual.
 
 
 ## Installation
