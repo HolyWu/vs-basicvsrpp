@@ -10,8 +10,6 @@ from .basicvsr import BasicVSR
 from .basicvsr_pp import BasicVSRPlusPlus
 from .builder import build_model
 
-vs_api_below4 = vs.__api_version__.api_major < 4
-
 
 def BasicVSRPP(clip: vs.VideoNode,
                model: int = 1,
@@ -31,7 +29,7 @@ def BasicVSRPP(clip: vs.VideoNode,
     For model 3-5, input resolution must be at least 256 and mod-4.
 
     Parameters:
-        clip: Clip to process. Only planar format with float sample type of 32 bit depth is supported.
+        clip: Clip to process. Only RGB format with float sample type of 32 bit depth is supported.
 
         model: Model to use.
             0 = REDS
@@ -157,13 +155,13 @@ def BasicVSRPP(clip: vs.VideoNode,
 
 
 def frame_to_tensor(f: vs.VideoFrame) -> torch.Tensor:
-    arr = np.stack([np.asarray(f.get_read_array(plane) if vs_api_below4 else f[plane]) for plane in range(f.format.num_planes)])
+    arr = np.stack([np.asarray(f[plane]) for plane in range(f.format.num_planes)])
     return torch.from_numpy(arr)
 
 
 def ndarray_to_frame(arr: np.ndarray, f: vs.VideoFrame) -> vs.VideoFrame:
     for plane in range(f.format.num_planes):
-        np.copyto(np.asarray(f.get_write_array(plane) if vs_api_below4 else f[plane]), arr[plane, :, :])
+        np.copyto(np.asarray(f[plane]), arr[plane, :, :])
     return f
 
 
