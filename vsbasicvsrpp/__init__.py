@@ -13,8 +13,16 @@ from .builder import build_model
 vs_api_below4 = vs.__api_version__.api_major < 4
 
 
-def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: int = 0, tile_y: int = 0, tile_pad: int = 16,
-               device_type: str = 'cuda', device_index: int = 0, fp16: bool = False, cpu_cache: bool = False) -> vs.VideoNode:
+def BasicVSRPP(clip: vs.VideoNode,
+               model: int = 1,
+               interval: int = 30,
+               tile_x: int = 0,
+               tile_y: int = 0,
+               tile_pad: int = 16,
+               device_type: str = 'cuda',
+               device_index: int = 0,
+               fp16: bool = False,
+               cpu_cache: bool = False) -> vs.VideoNode:
     '''
     BasicVSR++: Improving Video Super-Resolution with Enhanced Propagation and Alignment
 
@@ -93,14 +101,15 @@ def BasicVSRPP(clip: vs.VideoNode, model: int = 1, interval: int = 30, tile_x: i
 
     spynet_path = os.path.join(os.path.dirname(__file__), 'spynet.pth')
 
-    cfg = mmcv.Config(dict(type='BasicVSR',
-                           generator=dict(type='BasicVSRPlusPlus',
-                                          device=device,
-                                          mid_channels=64 if model < 3 else 128,
-                                          num_blocks=7 if model < 3 else 25,
-                                          is_low_res_input=True if model < 3 else False,
-                                          spynet_pretrained=spynet_path,
-                                          cpu_cache=cpu_cache if device_type == 'cuda' else False)))
+    cfg = mmcv.Config(
+        dict(type='BasicVSR',
+             generator=dict(type='BasicVSRPlusPlus',
+                            device=device,
+                            mid_channels=64 if model < 3 else 128,
+                            num_blocks=7 if model < 3 else 25,
+                            is_low_res_input=True if model < 3 else False,
+                            spynet_pretrained=spynet_path,
+                            cpu_cache=cpu_cache if device_type == 'cuda' else False)))
 
     scale = 4 if model < 3 else 1
 
