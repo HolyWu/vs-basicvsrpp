@@ -25,8 +25,6 @@ def BasicVSRPP(clip: vs.VideoNode,
     BasicVSR++: Improving Video Super-Resolution with Enhanced Propagation and Alignment
 
     Support either x4 upsampling (for model 0-2) or same size output (for model 3-5).
-    For model 0-2, input resolution must be at least 64.
-    For model 3-5, input resolution must be at least 256 and mod-4.
 
     Parameters:
         clip: Clip to process. Only RGB format with float sample type of 32 bit depth is supported.
@@ -63,6 +61,13 @@ def BasicVSRPP(clip: vs.VideoNode,
 
     if model not in [0, 1, 2, 3, 4, 5]:
         raise vs.Error('BasicVSR++: model must be 0, 1, 2, 3, 4, or 5')
+
+    if model < 3:
+        if clip.width < 64 or clip.height < 64:
+            raise vs.Error("BasicVSR++: clip's width and height must be at least 64 for model 0-2")
+    else:
+        if clip.width < 256 or clip.height < 256:
+            raise vs.Error("BasicVSR++: clip's width and height must be at least 256 for model 3-5")
 
     if interval < 1:
         raise vs.Error('BasicVSR++: interval must be at least 1')
