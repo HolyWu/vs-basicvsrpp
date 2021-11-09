@@ -83,6 +83,9 @@ def BasicVSRPP(clip: vs.VideoNode,
     if os.path.getsize(os.path.join(os.path.dirname(__file__), 'basicvsr_plusplus_reds4.pth')) == 0:
         raise vs.Error("BasicVSR++: model files have not been downloaded. run 'python -m vsbasicvsrpp' first")
 
+    scale = 4 if model < 3 else 1
+    model_num = model
+
     device = torch.device(device_type, device_index)
     if device_type == 'cuda':
         torch.backends.cudnn.enabled = True
@@ -114,8 +117,6 @@ def BasicVSRPP(clip: vs.VideoNode,
                             spynet_pretrained=spynet_path,
                             cpu_cache=cpu_cache if device_type == 'cuda' else False)))
 
-    scale = 4 if model < 3 else 1
-
     model = build_model(cfg._cfg_dict)
     mmcv.runner.load_checkpoint(model, model_path, strict=True)
     model.to(device)
@@ -143,8 +144,10 @@ def BasicVSRPP(clip: vs.VideoNode,
 
             if tile_x > 0 and tile_y > 0:
                 output = tile_process(imgs, scale, tile_x, tile_y, tile_pad, device, model)
-            else:
+            elif model_num < 3 or (imgs.size(3) % 4 == 0 and imgs.size(4) % 4 == 0):
                 output = model(imgs.to(device))
+            else:
+                output = mod_pad(imgs.to(device), 4, model)
 
             output = output.squeeze(0).detach().cpu().numpy()
             for i in range(output.shape[0]):
@@ -170,7 +173,7 @@ def ndarray_to_frame(arr: np.ndarray, f: vs.VideoFrame) -> vs.VideoFrame:
     return f
 
 
-def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_pad: int, device: torch.device, model: BasicVSR) -> torch.Tensor:
+def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_pad: int, model_num: int, device: torch.device, model: BasicVSR) -> torch.Tensor:
     batch, num_imgs, channel, height, width = img.shape
     output_height = height * scale
     output_width = width * scale
@@ -208,7 +211,10 @@ def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_p
             input_tile = img[:, :, :, input_start_y_pad:input_end_y_pad, input_start_x_pad:input_end_x_pad]
 
             # upscale tile
-            output_tile = model(input_tile.to(device))
+            if model_num < 3 or (input_tile.size(3) % 4 == 0 and input_tile.size(4) % 4 == 0):
+                output_tile = model(input_tile.to(device))
+            else:
+                output_tile = mod_pad(input_tile.to(device), 4, model)
 
             # output tile area on total image
             output_start_x = input_start_x * scale
@@ -227,3 +233,18 @@ def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_p
                 output_tile[:, :, :, output_start_y_tile:output_end_y_tile, output_start_x_tile:output_end_x_tile]
 
     return output
+
+
+def mod_pad(img: torch.Tensor, modulo: int, model: torch.nn.Module) -> torch.Tensor:
+    mod_pad_h, mod_pad_w = 0, 0
+    h, w = img.shape[3:]
+
+    if h % modulo != 0:
+        mod_pad_h = modulo - h % modulo
+
+    if w % modulo != 0:
+        mod_pad_w = modulo - w % modulo
+
+    img = torch.nn.functional.pad(img.squeeze(0), (0, mod_pad_w, 0, mod_pad_h), 'reflect')
+    output = model(img.unsqueeze(0))
+    return output[:, :, :, :h, :w]
