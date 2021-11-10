@@ -11,16 +11,18 @@ from .basicvsr_pp import BasicVSRPlusPlus
 from .builder import build_model
 
 
-def BasicVSRPP(clip: vs.VideoNode,
-               model: int = 1,
-               interval: int = 30,
-               tile_x: int = 0,
-               tile_y: int = 0,
-               tile_pad: int = 16,
-               device_type: str = 'cuda',
-               device_index: int = 0,
-               fp16: bool = False,
-               cpu_cache: bool = False) -> vs.VideoNode:
+def BasicVSRPP(
+    clip: vs.VideoNode,
+    model: int = 1,
+    interval: int = 30,
+    tile_x: int = 0,
+    tile_y: int = 0,
+    tile_pad: int = 16,
+    device_type: str = 'cuda',
+    device_index: int = 0,
+    fp16: bool = False,
+    cpu_cache: bool = False,
+) -> vs.VideoNode:
     '''
     BasicVSR++: Improving Video Super-Resolution with Enhanced Propagation and Alignment
 
@@ -108,14 +110,19 @@ def BasicVSRPP(clip: vs.VideoNode,
     spynet_path = os.path.join(os.path.dirname(__file__), 'spynet.pth')
 
     cfg = mmcv.Config(
-        dict(type='BasicVSR',
-             generator=dict(type='BasicVSRPlusPlus',
-                            device=device,
-                            mid_channels=64 if model < 3 else 128,
-                            num_blocks=7 if model < 3 else 25,
-                            is_low_res_input=True if model < 3 else False,
-                            spynet_pretrained=spynet_path,
-                            cpu_cache=cpu_cache if device_type == 'cuda' else False)))
+        dict(
+            type='BasicVSR',
+            generator=dict(
+                type='BasicVSRPlusPlus',
+                device=device,
+                mid_channels=64 if model < 3 else 128,
+                num_blocks=7 if model < 3 else 25,
+                is_low_res_input=True if model < 3 else False,
+                spynet_pretrained=spynet_path,
+                cpu_cache=cpu_cache if device_type == 'cuda' else False,
+            ),
+        )
+    )
 
     model = build_model(cfg._cfg_dict)
     mmcv.runner.load_checkpoint(model, model_path, strict=True)
@@ -229,8 +236,9 @@ def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_p
             output_end_y_tile = output_start_y_tile + input_tile_height * scale
 
             # put tile into output image
-            output[:, :, :, output_start_y:output_end_y, output_start_x:output_end_x] = \
-                output_tile[:, :, :, output_start_y_tile:output_end_y_tile, output_start_x_tile:output_end_x_tile]
+            output[:, :, :, output_start_y:output_end_y, output_start_x:output_end_x] = output_tile[
+                :, :, :, output_start_y_tile:output_end_y_tile, output_start_x_tile:output_end_x_tile
+            ]
 
     return output
 
