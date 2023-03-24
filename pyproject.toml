@@ -1,3 +1,32 @@
 [build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vsbasicvsrpp"
+version = "1.4.1"
+description = "BasicVSR++ function for VapourSynth"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "HolyWu", email = "holywu@gmail.com"}]
+keywords = ["BasicVSR++", "VapourSynth"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Multimedia :: Video"
+]
+dependencies = [
+  "mmcv-full>=1.7.1",
+  "numpy",
+  "requests",
+  "torch>=1.13.1",
+  "torchvision>=0.14.1",
+  "tqdm",
+  "VapourSynth>=55"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/HolyWu/vs-basicvsrpp"
+"Bug Tracker" = "https://github.com/HolyWu/vs-basicvsrpp/issues"

@@ -3,16 +3,16 @@ Improving Video Super-Resolution with Enhanced Propagation and Alignment, based 
 
 
 ## Dependencies
-- [mmcv-full](https://github.com/open-mmlab/mmcv#installation) 1.7
+- [mmcv-full](https://github.com/open-mmlab/mmcv#installation) 1.7.1
 - [NumPy](https://numpy.org/install)
-- [PyTorch](https://pytorch.org/get-started) 1.13
+- [PyTorch](https://pytorch.org/get-started) 1.13.1
 - [VapourSynth](http://www.vapoursynth.com/) R55+
 
 
 ## Installation
 ```
 pip install -U openmim vsbasicvsrpp
-mim install "mmcv-full>=1.7.0"
+mim install "mmcv-full>=1.7.1"
 python -m vsbasicvsrpp
 ```
 
