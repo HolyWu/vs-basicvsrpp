@@ -1,209 +1,253 @@
+from __future__ import annotations
+
+import logging
 import math
 import os
 
-import mmcv
 import numpy as np
 import torch
+import torch.nn.functional as F
 import vapoursynth as vs
+from mmcv.runner import load_checkpoint
 
 from .basicvsr import BasicVSR
 from .basicvsr_pp import BasicVSRPlusPlus
 from .builder import build_model
+from .logger import get_root_logger
+
+__version__ = "1.4.1"
+
+os.environ["CUDA_MODULE_LOADING"] = "LAZY"
+
+model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "models")
 
 
-def BasicVSRPP(
+@torch.inference_mode()
+def basicvsrpp(
     clip: vs.VideoNode,
+    device_index: int | None = None,
     model: int = 1,
-    interval: int = 30,
-    tile_x: int = 0,
-    tile_y: int = 0,
-    tile_pad: int = 16,
-    device_type: str = 'cuda',
-    device_index: int = 0,
-    fp16: bool = False,
+    length: int = 15,
     cpu_cache: bool = False,
+    tile_w: int = 0,
+    tile_h: int = 0,
+    tile_pad: int = 16,
 ) -> vs.VideoNode:
-    '''
-    BasicVSR++: Improving Video Super-Resolution with Enhanced Propagation and Alignment
+    """Improving Video Super-Resolution with Enhanced Propagation and Alignment
 
-    Support either x4 upsampling (for model 0-2) or same size output (for model 3-5).
-
-    Parameters:
-        clip: Clip to process. Only RGB format with float sample type of 32 bit depth is supported.
-
-        model: Model to use.
-            0 = REDS
-            1 = Vimeo-90K (BI)
-            2 = Vimeo-90K (BD)
-            3 = NTIRE 2021 Quality enhancement of heavily compressed videos Challenge - Track 1
-            4 = NTIRE 2021 Quality enhancement of heavily compressed videos Challenge - Track 2
-            5 = NTIRE 2021 Quality enhancement of heavily compressed videos Challenge - Track 3
-
-        interval: Interval size.
-
-        tile_x, tile_y: Tile width and height respectively, 0 for no tiling.
-            It's recommended that the input's width and height is divisible by the tile's width and height respectively.
-            Set it to the maximum value that your GPU supports to reduce its impact on the output.
-
-        tile_pad: Tile padding.
-
-        device_type: Device type on which the tensor is allocated. Must be 'cuda' or 'cpu'.
-
-        device_index: Device ordinal for the device type.
-
-        fp16: fp16 mode for faster and more lightweight inference on cards with Tensor Cores.
-
-        cpu_cache: Whether to send the intermediate features to CPU. This saves GPU memory, but slows down the inference speed.
-    '''
+    :param clip:            Clip to process. Only RGBH and RGBS formats are supported.
+                            RGBH performs inference in FP16 mode while RGBS performs inference in FP32 mode.
+    :param device_index:    Device ordinal of the GPU.
+    :param model:           Model to use.
+                            0 = Video Super-Resolution (REDS)
+                            1 = Video Super-Resolution (Vimeo-90K BI degradation)
+                            2 = Video Super-Resolution (Vimeo-90K BD degradation)
+                            3 = NTIRE 2021 Video Super-Resolution
+                            4 = NTIRE 2021 Quality Enhancement of Compressed Video - Track 1
+                            5 = NTIRE 2021 Quality Enhancement of Compressed Video - Track 2
+                            6 = NTIRE 2021 Quality Enhancement of Compressed Video - Track 3
+                            7 = Video Deblurring (DVD)
+                            8 = Video Deblurring (GoPro)
+                            9 = Video Denoising
+    :param length:          Sequence length that the model processes.
+    :param cpu_cache:       Send the intermediate features to CPU.
+                            This saves GPU memory, but slows down the inference speed.
+    :param tile_w:          Tile width. As too large images result in the out of GPU memory issue, so this tile option
+                            will first crop input images into tiles, and then process each of them. Finally, they will
+                            be merged into one image. 0 denotes for do not use tile.
+    :param tile_h:          Tile height.
+    :param tile_pad:        Pad size for each tile, to remove border artifacts.
+    """
     if not isinstance(clip, vs.VideoNode):
-        raise vs.Error('BasicVSR++: this is not a clip')
+        raise vs.Error("basicvsrpp: this is not a clip")
 
-    if clip.format.id != vs.RGBS:
-        raise vs.Error('BasicVSR++: only RGBS format is supported')
+    if clip.format.id not in [vs.RGBH, vs.RGBS]:
+        raise vs.Error("basicvsrpp: only RGBH and RGBS formats are supported")
 
-    if model not in [0, 1, 2, 3, 4, 5]:
-        raise vs.Error('BasicVSR++: model must be 0, 1, 2, 3, 4, or 5')
+    if not torch.cuda.is_available():
+        raise vs.Error("basicvsrpp: CUDA is not available")
 
-    if model < 3:
-        if clip.width < 64 or clip.height < 64:
-            raise vs.Error("BasicVSR++: clip's width and height must be at least 64 for model 0-2")
+    if model not in range(10):
+        raise vs.Error("basicvsrpp: model must be 0, 1, 2, 3, 4, 5, 6, 7, 8, or 9")
+
+    if length < 1:
+        raise vs.Error("basicvsrpp: length must be at least 1")
+
+    if os.path.getsize(os.path.join(model_dir, "basicvsr_plusplus_c64n7_8x1_600k_reds4_20210217-db622b2f.pth")) == 0:
+        raise vs.Error("basicvsrpp: model files have not been downloaded. run 'python -m vsbasicvsrpp' first")
+
+    torch.set_float32_matmul_precision("high")
+
+    fp16 = clip.format.bits_per_sample == 16
+
+    device = torch.device("cuda", device_index)
+
+    match model:
+        case 0:
+            model_name = "basicvsr_plusplus_c64n7_8x1_600k_reds4_20210217-db622b2f.pth"
+            mid_channels = 64
+            num_blocks = 7
+            is_low_res_input = True
+        case 1:
+            model_name = "basicvsr_plusplus_c64n7_8x1_300k_vimeo90k_bi_20210305-4ef437e2.pth"
+            mid_channels = 64
+            num_blocks = 7
+            is_low_res_input = True
+        case 2:
+            model_name = "basicvsr_plusplus_c64n7_8x1_300k_vimeo90k_bd_20210305-ab315ab1.pth"
+            mid_channels = 64
+            num_blocks = 7
+            is_low_res_input = True
+        case 3:
+            model_name = "basicvsr_plusplus_c128n25_ntire_vsr_20210311-1ff35292.pth"
+            mid_channels = 128
+            num_blocks = 25
+            is_low_res_input = True
+        case 4:
+            model_name = "basicvsr_plusplus_c128n25_ntire_decompress_track1_20210223-7b2eba02.pth"
+            mid_channels = 128
+            num_blocks = 25
+            is_low_res_input = False
+        case 5:
+            model_name = "basicvsr_plusplus_c128n25_ntire_decompress_track2_20210314-eeae05e6.pth"
+            mid_channels = 128
+            num_blocks = 25
+            is_low_res_input = False
+        case 6:
+            model_name = "basicvsr_plusplus_c128n25_ntire_decompress_track3_20210304-6daf4a40.pth"
+            mid_channels = 128
+            num_blocks = 25
+            is_low_res_input = False
+        case 7:
+            model_name = "basicvsr_plusplus_deblur_dvd-ecd08b7f.pth"
+            mid_channels = 64
+            num_blocks = 15
+            is_low_res_input = False
+        case 8:
+            model_name = "basicvsr_plusplus_deblur_gopro-3c5bb9b5.pth"
+            mid_channels = 64
+            num_blocks = 15
+            is_low_res_input = False
+        case 9:
+            model_name = "basicvsr_plusplus_denoise-28f6920c.pth"
+            mid_channels = 64
+            num_blocks = 15
+            is_low_res_input = False
+
+    if is_low_res_input:
+        min_res = 64
+        modulo = 1
+        scale = 4
     else:
-        if clip.width < 256 or clip.height < 256:
-            raise vs.Error("BasicVSR++: clip's width and height must be at least 256 for model 3-5")
+        min_res = 256
+        modulo = 4
+        scale = 1
 
-    if interval < 1:
-        raise vs.Error('BasicVSR++: interval must be at least 1')
+    model_path = os.path.join(model_dir, model_name)
+    spynet_path = os.path.join(model_dir, "spynet_20210409-c6c1bd09.pth")
 
-    device_type = device_type.lower()
-
-    if device_type not in ['cuda', 'cpu']:
-        raise vs.Error("BasicVSR++: device_type must be 'cuda' or 'cpu'")
-
-    if device_type == 'cuda' and not torch.cuda.is_available():
-        raise vs.Error('BasicVSR++: CUDA is not available')
-
-    if os.path.getsize(os.path.join(os.path.dirname(__file__), 'basicvsr_plusplus_reds4.pth')) == 0:
-        raise vs.Error("BasicVSR++: model files have not been downloaded. run 'python -m vsbasicvsrpp' first")
-
-    scale = 4 if model < 3 else 1
-    model_num = model
-
-    device = torch.device(device_type, device_index)
-    if device_type == 'cuda':
-        torch.backends.cudnn.enabled = True
-        torch.backends.cudnn.benchmark = True
-
-    if model == 0:
-        model_name = 'basicvsr_plusplus_reds4.pth'
-    elif model == 1:
-        model_name = 'basicvsr_plusplus_vimeo90k_bi.pth'
-    elif model == 2:
-        model_name = 'basicvsr_plusplus_vimeo90k_bd.pth'
-    elif model == 3:
-        model_name = 'basicvsr_plusplus_ntire_decompress_track1.pth'
-    elif model == 4:
-        model_name = 'basicvsr_plusplus_ntire_decompress_track2.pth'
-    else:
-        model_name = 'basicvsr_plusplus_ntire_decompress_track3.pth'
-    model_path = os.path.join(os.path.dirname(__file__), model_name)
-
-    spynet_path = os.path.join(os.path.dirname(__file__), 'spynet.pth')
-
-    cfg = mmcv.Config(
-        dict(
-            type='BasicVSR',
-            generator=dict(
-                type='BasicVSRPlusPlus',
-                device=device,
-                mid_channels=64 if model < 3 else 128,
-                num_blocks=7 if model < 3 else 25,
-                is_low_res_input=True if model < 3 else False,
-                spynet_pretrained=spynet_path,
-                cpu_cache=cpu_cache if device_type == 'cuda' else False,
-            ),
-        )
+    cfg = dict(
+        type="BasicVSR",
+        generator=dict(
+            type="BasicVSRPlusPlus",
+            mid_channels=mid_channels,
+            num_blocks=num_blocks,
+            is_low_res_input=is_low_res_input,
+            spynet_pretrained=spynet_path,
+            cpu_cache=cpu_cache,
+        ),
     )
 
-    model = build_model(cfg._cfg_dict)
-    mmcv.runner.load_checkpoint(model, model_path, strict=True)
-    model.to(device)
-    model.eval()
+    module = build_model(cfg)
+    logger = get_root_logger(log_level=logging.WARNING)
+    load_checkpoint(module, model_path, map_location="cpu", logger=logger)
+    module.eval().to(device)
     if fp16:
-        model.half()
+        module.half()
+
+    pad_w = math.ceil(max(clip.width, min_res) / modulo) * modulo
+    pad_h = math.ceil(max(clip.height, min_res) / modulo) * modulo
 
     cache = {}
 
     @torch.inference_mode()
-    def basicvsrpp(n: int, f: vs.VideoFrame) -> vs.VideoFrame:
+    def inference(n: int, f: list[vs.VideoFrame]) -> vs.VideoFrame:
         if str(n) not in cache:
             cache.clear()
 
-            imgs = [frame_to_tensor(f[0])]
-            for i in range(1, interval):
-                if (n + i) >= clip.num_frames:
+            img = [frame_to_tensor(f[0])]
+            for i in range(1, length):
+                if n + i >= clip.num_frames:
                     break
-                imgs.append(frame_to_tensor(clip.get_frame(n + i)))
+                img.append(frame_to_tensor(clip.get_frame(n + i)))
 
-            imgs = torch.stack(imgs)
-            imgs = imgs.unsqueeze(0)
-            if fp16:
-                imgs = imgs.half()
+            img = torch.stack(img).unsqueeze(0)
 
-            if tile_x > 0 and tile_y > 0:
-                output = tile_process(imgs, scale, tile_x, tile_y, tile_pad, device, model)
-            elif model_num < 3 or (imgs.size(3) % 4 == 0 and imgs.size(4) % 4 == 0):
-                output = model(imgs.to(device))
+            if tile_w > 0 and tile_h > 0:
+                output = tile_process(img, scale, tile_w, tile_h, tile_pad, device, min_res, modulo, module)
             else:
-                output = mod_pad(imgs.to(device), 4, model)
+                img = img.to(device).clamp(0.0, 1.0)
+
+                h, w = img.shape[3:]
+                mode = "reflect" if pad_w - w < w and pad_h - h < h else "replicate"
+                img = F.pad(img, (0, pad_w - w, 0, pad_h - h, 0, 0), mode)
+
+                output = module(img)
+                output = output[:, :, :, : h * scale, : w * scale]
 
             output = output.squeeze(0).detach().cpu().numpy()
             for i in range(output.shape[0]):
                 cache[str(n + i)] = output[i, :, :, :]
 
-            del imgs
-            torch.cuda.empty_cache()
-
         return ndarray_to_frame(cache[str(n)], f[1].copy())
 
-    new_clip = clip.std.BlankClip(width=clip.width * scale, height=clip.height * scale)
-    return new_clip.std.ModifyFrame(clips=[clip, new_clip], selector=basicvsrpp)
+    new_clip = clip.std.BlankClip(width=clip.width * scale, height=clip.height * scale, keep=True)
+    return new_clip.std.ModifyFrame([clip, new_clip], inference)
 
 
-def frame_to_tensor(f: vs.VideoFrame) -> torch.Tensor:
-    arr = np.stack([np.asarray(f[plane]) for plane in range(f.format.num_planes)])
-    return torch.from_numpy(arr)
+def frame_to_tensor(frame: vs.VideoFrame) -> torch.Tensor:
+    array = np.stack([np.asarray(frame[plane]) for plane in range(frame.format.num_planes)])
+    return torch.from_numpy(array)
 
 
-def ndarray_to_frame(arr: np.ndarray, f: vs.VideoFrame) -> vs.VideoFrame:
-    for plane in range(f.format.num_planes):
-        np.copyto(np.asarray(f[plane]), arr[plane, :, :])
-    return f
+def ndarray_to_frame(array: np.ndarray, frame: vs.VideoFrame) -> vs.VideoFrame:
+    for plane in range(frame.format.num_planes):
+        np.copyto(np.asarray(frame[plane]), array[plane, :, :])
+    return frame
 
 
-def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_pad: int, model_num: int, device: torch.device, model: BasicVSR) -> torch.Tensor:
-    batch, num_imgs, channel, height, width = img.shape
-    output_height = height * scale
-    output_width = width * scale
-    output_shape = (batch, num_imgs, channel, output_height, output_width)
+def tile_process(
+    img: torch.Tensor,
+    scale: int,
+    tile_w: int,
+    tile_h: int,
+    tile_pad: int,
+    device: torch.device,
+    min_res: int,
+    modulo: int,
+    module: torch.nn.Module,
+) -> torch.Tensor:
+    batch, length, channel, height, width = img.shape
+    output_shape = (batch, length, channel, height * scale, width * scale)
 
     # start with black image
     output = img.new_zeros(output_shape)
 
-    tiles_x = math.ceil(width / tile_x)
-    tiles_y = math.ceil(height / tile_y)
+    tiles_x = math.ceil(width / tile_w)
+    tiles_y = math.ceil(height / tile_h)
 
     # loop over all tiles
     for y in range(tiles_y):
         for x in range(tiles_x):
             # extract tile from input image
-            ofs_x = x * tile_x
-            ofs_y = y * tile_y
+            ofs_x = x * tile_w
+            ofs_y = y * tile_h
 
             # input tile area on total image
             input_start_x = ofs_x
-            input_end_x = min(ofs_x + tile_x, width)
+            input_end_x = min(ofs_x + tile_w, width)
             input_start_y = ofs_y
-            input_end_y = min(ofs_y + tile_y, height)
+            input_end_y = min(ofs_y + tile_h, height)
 
             # input tile area on total image with padding
             input_start_x_pad = max(input_start_x - tile_pad, 0)
@@ -216,12 +260,17 @@ def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_p
             input_tile_height = input_end_y - input_start_y
 
             input_tile = img[:, :, :, input_start_y_pad:input_end_y_pad, input_start_x_pad:input_end_x_pad]
+            input_tile = input_tile.to(device).clamp(0.0, 1.0)
 
-            # upscale tile
-            if model_num < 3 or (input_tile.size(3) % 4 == 0 and input_tile.size(4) % 4 == 0):
-                output_tile = model(input_tile.to(device))
-            else:
-                output_tile = mod_pad(input_tile.to(device), 4, model)
+            h, w = input_tile.shape[3:]
+            pad_w = math.ceil(max(w, min_res) / modulo) * modulo
+            pad_h = math.ceil(max(h, min_res) / modulo) * modulo
+            mode = "reflect" if pad_w - w < w and pad_h - h < h else "replicate"
+            input_tile = F.pad(input_tile, (0, pad_w - w, 0, pad_h - h, 0, 0), mode)
+
+            # process tile
+            output_tile = module(input_tile)
+            output_tile = output_tile[:, :, :, : h * scale, : w * scale]
 
             # output tile area on total image
             output_start_x = input_start_x * scale
@@ -241,18 +290,3 @@ def tile_process(img: torch.Tensor, scale: int, tile_x: int, tile_y: int, tile_p
             ]
 
     return output
-
-
-def mod_pad(img: torch.Tensor, modulo: int, model: torch.nn.Module) -> torch.Tensor:
-    mod_pad_h, mod_pad_w = 0, 0
-    h, w = img.shape[3:]
-
-    if h % modulo != 0:
-        mod_pad_h = modulo - h % modulo
-
-    if w % modulo != 0:
-        mod_pad_w = modulo - w % modulo
-
-    img = torch.nn.functional.pad(img.squeeze(0), (0, mod_pad_w, 0, mod_pad_h), 'reflect')
-    output = model(img.unsqueeze(0))
-    return output[:, :, :, :h, :w]

@@ -1,4 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import logging
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,6 +8,7 @@ from mmcv.cnn import ConvModule
 from mmcv.runner import load_checkpoint
 
 from .flow_warp import flow_warp
+from .logger import get_root_logger
 from .sr_backbone_utils import ResidualBlockNoBN, make_layer
 
 
@@ -36,8 +39,7 @@ class ResidualBlocksWithInputConv(nn.Module):
         self.main = nn.Sequential(*main)
 
     def forward(self, feat):
-        """
-        Forward function for ResidualBlocksWithInputConv.
+        """Forward function for ResidualBlocksWithInputConv.
 
         Args:
             feat (Tensor): Input feature with shape (n, in_channels, h, w)
@@ -69,7 +71,8 @@ class SPyNet(nn.Module):
             [SPyNetBasicModule() for _ in range(6)])
 
         if isinstance(pretrained, str):
-            load_checkpoint(self, pretrained, strict=True)
+            logger = get_root_logger(log_level=logging.WARNING)
+            load_checkpoint(self, pretrained, strict=True, logger=logger)
         elif pretrained is not None:
             raise TypeError('[pretrained] should be str or None, '
                             f'but got {type(pretrained)}.')
@@ -127,8 +130,7 @@ class SPyNet(nn.Module):
                     input=flow,
                     scale_factor=2,
                     mode='bilinear',
-                    align_corners=True,
-                    recompute_scale_factor=False) * 2.0
+                    align_corners=True) * 2.0
 
             # add the residue to the upsampled flow
             flow = flow_up + self.basic_module[level](
@@ -160,19 +162,17 @@ class SPyNet(nn.Module):
         w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
         h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
         ref = F.interpolate(
-            input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)
+            input=ref, size=(h_up, w_up), mode='bilinear')
         supp = F.interpolate(
             input=supp,
             size=(h_up, w_up),
-            mode='bilinear',
-            align_corners=False)
+            mode='bilinear')
 
         # compute flow, and resize back to the original resolution
         flow = F.interpolate(
             input=self.compute_flow(ref, supp),
             size=(h, w),
-            mode='bilinear',
-            align_corners=False)
+            mode='bilinear')
 
         # adjust the flow values
         flow[:, 0, :, :] *= float(w) / float(w_up)

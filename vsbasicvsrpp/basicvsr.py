@@ -30,12 +30,9 @@ class BasicVSR(nn.Module):
         self.register_buffer('step_counter', torch.zeros(1))
 
     def forward(self, lq):
-        """Testing forward function.
+        """Forward function.
 
         Args:
             lq (Tensor): LQ Tensor with shape (n, t, c, h, w).
-
-        Returns:
-            Tensor: Output result.
         """
         return self.generator(lq)
