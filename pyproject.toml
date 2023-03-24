@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vsbasicvsrpp"
-version = "1.4.1"
+version = "2.0.0"
 description = "BasicVSR++ function for VapourSynth"
 readme = "README.md"
 requires-python = ">=3.10"

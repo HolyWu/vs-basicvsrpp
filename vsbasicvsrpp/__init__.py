@@ -15,7 +15,7 @@ from .basicvsr_pp import BasicVSRPlusPlus
 from .builder import build_model
 from .logger import get_root_logger
 
-__version__ = "1.4.1"
+__version__ = "2.0.0"
 
 os.environ["CUDA_MODULE_LOADING"] = "LAZY"
 
