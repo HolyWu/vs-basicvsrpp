@@ -11,8 +11,10 @@ Improving Video Super-Resolution with Enhanced Propagation and Alignment, based 
 
 ## Installation
 ```
-pip install -U openmim vsbasicvsrpp
+pip install -U openmim
 mim install "mmcv-full>=1.7.1"
+
+pip install -U vsbasicvsrpp
 python -m vsbasicvsrpp
 ```
 
