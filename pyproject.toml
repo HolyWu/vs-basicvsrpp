@@ -20,6 +20,7 @@ classifiers = [
 dependencies = [
   "mmcv-full>=1.7.1",
   "numpy",
+  "opencv-python",
   "requests",
   "torch>=1.13.1",
   "torchvision>=0.14.1",
