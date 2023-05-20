@@ -6,7 +6,7 @@ Improving Video Super-Resolution with Enhanced Propagation and Alignment, based 
 - [mmcv](https://github.com/open-mmlab/mmcv#installation) >=2.0.0
 - [NumPy](https://numpy.org/install)
 - [PyTorch](https://pytorch.org/get-started) >=1.13.1
-- [VapourSynth](http://www.vapoursynth.com/) R55+
+- [VapourSynth](http://www.vapoursynth.com/) >=R60
 
 
 ## Installation
