@@ -21,8 +21,8 @@ dependencies = [
   "mmcv>=2.0.0",
   "numpy",
   "requests",
-  "torch>=1.13.1",
-  "torchvision>=0.14.1",
+  "torch>=2.0.1",
+  "torchvision>=0.15.2",
   "tqdm",
   "VapourSynth>=60"
 ]
