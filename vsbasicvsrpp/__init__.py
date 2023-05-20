@@ -13,7 +13,7 @@ from .basicvsr import BasicVSR
 from .basicvsr_plusplus_net import BasicVSRPlusPlusNet
 from .registry import MODELS
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 os.environ["CUDA_MODULE_LOADING"] = "LAZY"
 
