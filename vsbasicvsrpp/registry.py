@@ -1,8 +1,15 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-from mmcv.cnn import MODELS as MMCV_MODELS
-from mmcv.utils import Registry
+"""Registries and utilities in MMagic.
 
-MODELS = Registry('model', parent=MMCV_MODELS)
-BACKBONES = MODELS
-COMPONENTS = MODELS
-LOSSES = MODELS
+MMagic provides 17 registry nodes to support using modules across projects.
+Each node is a child of the root registry in MMEngine.
+
+More details can be found at
+https://mmengine.readthedocs.io/en/latest/tutorials/registry.html.
+"""
+
+from mmengine.registry import MODELS as MMENGINE_MODELS
+from mmengine.registry import Registry
+
+# Neural network modules inheriting `nn.Module`.
+MODELS = Registry('model', parent=MMENGINE_MODELS)

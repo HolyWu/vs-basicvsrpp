@@ -18,9 +18,8 @@ classifiers = [
   "Topic :: Multimedia :: Video"
 ]
 dependencies = [
-  "mmcv-full>=1.7.1",
+  "mmcv>=2.0.0",
   "numpy",
-  "opencv-python",
   "requests",
   "torch>=1.13.1",
   "torchvision>=0.14.1",

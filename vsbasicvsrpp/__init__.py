@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import math
 import os
 
@@ -8,12 +7,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import vapoursynth as vs
-from mmcv.runner import load_checkpoint
+from mmengine.runner import load_checkpoint
 
 from .basicvsr import BasicVSR
-from .basicvsr_pp import BasicVSRPlusPlus
-from .builder import build_model
-from .logger import get_root_logger
+from .basicvsr_plusplus_net import BasicVSRPlusPlusNet
+from .registry import MODELS
 
 __version__ = "2.0.0"
 
@@ -149,7 +147,7 @@ def basicvsrpp(
     cfg = dict(
         type="BasicVSR",
         generator=dict(
-            type="BasicVSRPlusPlus",
+            type="BasicVSRPlusPlusNet",
             mid_channels=mid_channels,
             num_blocks=num_blocks,
             is_low_res_input=is_low_res_input,
@@ -158,9 +156,8 @@ def basicvsrpp(
         ),
     )
 
-    module = build_model(cfg)
-    logger = get_root_logger(log_level=logging.WARNING)
-    load_checkpoint(module, model_path, map_location="cpu", logger=logger)
+    module = MODELS.build(cfg)
+    load_checkpoint(module, model_path, map_location="cpu", logger="silent")
     module.eval().to(device)
     if fp16:
         module.half()

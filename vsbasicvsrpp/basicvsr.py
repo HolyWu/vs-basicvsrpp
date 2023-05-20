@@ -2,7 +2,6 @@
 import torch
 import torch.nn as nn
 
-from .builder import build_backbone
 from .registry import MODELS
 
 
@@ -24,15 +23,12 @@ class BasicVSR(nn.Module):
         super().__init__()
 
         # generator
-        self.generator = build_backbone(generator)
+        self.generator = MODELS.build(generator)
 
         # count training steps
         self.register_buffer('step_counter', torch.zeros(1))
 
-    def forward(self, lq):
-        """Forward function.
+    def forward(self, inputs):
+        """Forward tensor. Returns result of simple forward."""
 
-        Args:
-            lq (Tensor): LQ Tensor with shape (n, t, c, h, w).
-        """
-        return self.generator(lq)
+        return self.generator(inputs)

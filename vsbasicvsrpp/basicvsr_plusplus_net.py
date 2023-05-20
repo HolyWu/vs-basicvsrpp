@@ -1,22 +1,19 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-import logging
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import constant_init
 from mmcv.ops import ModulatedDeformConv2d, modulated_deform_conv2d
-from mmcv.runner import load_checkpoint
+from mmengine.model import BaseModule
+from mmengine.model.weight_init import constant_init
 
 from .basicvsr_net import ResidualBlocksWithInputConv, SPyNet
 from .flow_warp import flow_warp
-from .logger import get_root_logger
-from .registry import BACKBONES
+from .registry import MODELS
 from .upsample import PixelShufflePack
 
 
-@BACKBONES.register_module()
-class BasicVSRPlusPlus(nn.Module):
+@MODELS.register_module()
+class BasicVSRPlusPlusNet(BaseModule):
     """BasicVSR++ network structure.
 
     Support either x4 upsampling or same size output.
@@ -37,11 +34,8 @@ class BasicVSRPlusPlus(nn.Module):
             resolution. Default: True.
         spynet_pretrained (str, optional): Pre-trained model path of SPyNet.
             Default: None.
-        cpu_cache (bool, optional): When the length of sequence is larger
-            than this value, the intermediate features are sent to CPU. This
-            saves GPU memory, but slows down the inference speed. You can
-            increase this number if you have a GPU with large memory.
-            Default: 100.
+        cpu_cache (bool, optional): Whether to cache the features in CPU.
+            Default: False.
     """
 
     def __init__(self,
@@ -101,9 +95,6 @@ class BasicVSRPlusPlus(nn.Module):
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
-        # check if the sequence is augmented by flipping
-        self.is_mirror_extended = False
-
     def check_if_mirror_extended(self, lqs):
         """Check whether the input is a mirror-extended sequence.
 
@@ -115,6 +106,8 @@ class BasicVSRPlusPlus(nn.Module):
                 shape (n, t, c, h, w).
         """
 
+        # check if the sequence is augmented by flipping
+        self.is_mirror_extended = False
         if lqs.size(1) % 2 == 0:
             lqs_1, lqs_2 = torch.chunk(lqs, 2, dim=1)
             if torch.norm(lqs_1 - lqs_2.flip(1)) == 0:
@@ -171,10 +164,12 @@ class BasicVSRPlusPlus(nn.Module):
         """
 
         n, t, _, h, w = flows.size()
-        device = flows.device
 
-        frame_idx = range(0, t + 1)
-        flow_idx = range(-1, t)
+        # PyTorch 2.0 could not compile data type of 'range'
+        # frame_idx = range(0, t + 1)
+        # flow_idx = range(-1, t)
+        frame_idx = list(range(0, t + 1))
+        flow_idx = list(range(-1, t))
         mapping_idx = list(range(0, len(feats['spatial'])))
         mapping_idx += mapping_idx[::-1]
 
@@ -186,13 +181,13 @@ class BasicVSRPlusPlus(nn.Module):
         for i, idx in enumerate(frame_idx):
             feat_current = feats['spatial'][mapping_idx[idx]]
             if self.cpu_cache:
-                feat_current = feat_current.cuda(device)
-                feat_prop = feat_prop.cuda(device)
+                feat_current = feat_current.cuda()
+                feat_prop = feat_prop.cuda()
             # second-order deformable alignment
             if i > 0:
                 flow_n1 = flows[:, flow_idx[i], :, :, :]
                 if self.cpu_cache:
-                    flow_n1 = flow_n1.cuda(device)
+                    flow_n1 = flow_n1.cuda()
 
                 cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
 
@@ -204,11 +199,11 @@ class BasicVSRPlusPlus(nn.Module):
                 if i > 1:  # second-order features
                     feat_n2 = feats[module_name][-2]
                     if self.cpu_cache:
-                        feat_n2 = feat_n2.cuda(device)
+                        feat_n2 = feat_n2.cuda()
 
                     flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
                     if self.cpu_cache:
-                        flow_n2 = flow_n2.cuda(device)
+                        flow_n2 = flow_n2.cuda()
 
                     flow_n2 = flow_n1 + flow_warp(flow_n2,
                                                   flow_n1.permute(0, 2, 3, 1))
@@ -226,7 +221,7 @@ class BasicVSRPlusPlus(nn.Module):
                 for k in feats if k not in ['spatial', module_name]
             ] + [feat_prop]
             if self.cpu_cache:
-                feat = [f.cuda(device) for f in feat]
+                feat = [f.cuda() for f in feat]
 
             feat = torch.cat(feat, dim=1)
             feat_prop = feat_prop + self.backbone[module_name](feat)
@@ -253,8 +248,6 @@ class BasicVSRPlusPlus(nn.Module):
             Tensor: Output HR sequence with shape (n, t, c, 4h, 4w).
         """
 
-        device = lqs.device
-
         outputs = []
         num_outputs = len(feats['spatial'])
 
@@ -266,7 +259,7 @@ class BasicVSRPlusPlus(nn.Module):
             hr.insert(0, feats['spatial'][mapping_idx[i]])
             hr = torch.cat(hr, dim=1)
             if self.cpu_cache:
-                hr = hr.cuda(device)
+                hr = hr.cuda()
 
             hr = self.reconstruction(hr)
             hr = self.lrelu(self.upsample1(hr))
@@ -350,22 +343,6 @@ class BasicVSRPlusPlus(nn.Module):
 
         return self.upsample(lqs, feats)
 
-    def init_weights(self, pretrained=None, strict=True):
-        """Init weights for models.
-
-        Args:
-            pretrained (str, optional): Path for pretrained weights. If given
-                None, pretrained weights will not be loaded. Default: None.
-            strict (bool, optional): Whether strictly load the pretrained
-                model. Default: True.
-        """
-        if isinstance(pretrained, str):
-            logger = get_root_logger(log_level=logging.WARNING)
-            load_checkpoint(self, pretrained, strict=strict, logger=logger)
-        elif pretrained is not None:
-            raise TypeError(f'"pretrained" must be a str or None. '
-                            f'But received {type(pretrained)}.')
-
 
 class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
     """Second-order deformable alignment module.
@@ -403,9 +380,11 @@ class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
         self.init_offset()
 
     def init_offset(self):
+        """Init constant offset."""
         constant_init(self.conv_offset[-1], val=0, bias=0)
 
     def forward(self, x, extra_feat, flow_1, flow_2):
+        """Forward function."""
         extra_feat = torch.cat([extra_feat, flow_1, flow_2], dim=1)
         out = self.conv_offset(extra_feat)
         o1, o2, mask = torch.chunk(out, 3, dim=1)

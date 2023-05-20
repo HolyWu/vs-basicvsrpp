@@ -1,18 +1,18 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-import logging
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import ConvModule
-from mmcv.runner import load_checkpoint
+from mmengine import MMLogger
+from mmengine.model import BaseModule
+from mmengine.runner import load_checkpoint
 
 from .flow_warp import flow_warp
-from .logger import get_root_logger
-from .sr_backbone_utils import ResidualBlockNoBN, make_layer
+from .model_utils import make_layer
+from .sr_backbone import ResidualBlockNoBN
 
 
-class ResidualBlocksWithInputConv(nn.Module):
+class ResidualBlocksWithInputConv(BaseModule):
     """Residual blocks with a convolution in front.
 
     Args:
@@ -50,7 +50,7 @@ class ResidualBlocksWithInputConv(nn.Module):
         return self.main(feat)
 
 
-class SPyNet(nn.Module):
+class SPyNet(BaseModule):
     """SPyNet network structure.
 
     The difference to the SPyNet in [tof.py] is that
@@ -71,8 +71,7 @@ class SPyNet(nn.Module):
             [SPyNetBasicModule() for _ in range(6)])
 
         if isinstance(pretrained, str):
-            logger = get_root_logger(log_level=logging.WARNING)
-            load_checkpoint(self, pretrained, strict=True, logger=logger)
+            load_checkpoint(self, pretrained, strict=True, logger="silent")
         elif pretrained is not None:
             raise TypeError('[pretrained] should be str or None, '
                             f'but got {type(pretrained)}.')
@@ -162,17 +161,19 @@ class SPyNet(nn.Module):
         w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
         h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
         ref = F.interpolate(
-            input=ref, size=(h_up, w_up), mode='bilinear')
+            input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)
         supp = F.interpolate(
             input=supp,
             size=(h_up, w_up),
-            mode='bilinear')
+            mode='bilinear',
+            align_corners=False)
 
         # compute flow, and resize back to the original resolution
         flow = F.interpolate(
             input=self.compute_flow(ref, supp),
             size=(h, w),
-            mode='bilinear')
+            mode='bilinear',
+            align_corners=False)
 
         # adjust the flow values
         flow[:, 0, :, :] *= float(w) / float(w_up)
@@ -181,7 +182,7 @@ class SPyNet(nn.Module):
         return flow
 
 
-class SPyNetBasicModule(nn.Module):
+class SPyNetBasicModule(BaseModule):
     """Basic Module for SPyNet.
 
     Paper:
