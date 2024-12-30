@@ -3,11 +3,7 @@ import torch
 import torch.nn.functional as F
 
 
-def flow_warp(x,
-              flow,
-              interpolation='bilinear',
-              padding_mode='zeros',
-              align_corners=True):
+def flow_warp(x, flow, interpolation="bilinear", padding_mode="zeros", align_corners=True):
     """Warp an image or a feature map with optical flow.
 
     Args:
@@ -25,22 +21,24 @@ def flow_warp(x,
         Tensor: Warped image or feature map.
     """
     if x.size()[-2:] != flow.size()[1:3]:
-        raise ValueError(f'The spatial sizes of input ({x.size()[-2:]}) and '
-                         f'flow ({flow.size()[1:3]}) are not the same.')
+        raise ValueError(
+            f"The spatial sizes of input ({x.size()[-2:]}) and " f"flow ({flow.size()[1:3]}) are not the same."
+        )
     _, _, h, w = x.size()
     # create mesh grid
     device = flow.device
     # torch.meshgrid has been modified in 1.10.0 (compatibility with previous
     # versions), and will be further modified in 1.12 (Breaking Change)
-    if 'indexing' in torch.meshgrid.__code__.co_varnames:
+    if "indexing" in torch.meshgrid.__code__.co_varnames:
         grid_y, grid_x = torch.meshgrid(
             torch.arange(0, h, device=device, dtype=x.dtype),
             torch.arange(0, w, device=device, dtype=x.dtype),
-            indexing='ij')
+            indexing="ij",
+        )
     else:
         grid_y, grid_x = torch.meshgrid(
-            torch.arange(0, h, device=device, dtype=x.dtype),
-            torch.arange(0, w, device=device, dtype=x.dtype))
+            torch.arange(0, h, device=device, dtype=x.dtype), torch.arange(0, w, device=device, dtype=x.dtype)
+        )
     grid = torch.stack((grid_x, grid_y), 2)  # h, w, 2
     grid.requires_grad = False
 
@@ -50,10 +48,5 @@ def flow_warp(x,
     grid_flow_y = 2.0 * grid_flow[:, :, :, 1] / max(h - 1, 1) - 1.0
     grid_flow = torch.stack((grid_flow_x, grid_flow_y), dim=3)
     grid_flow = grid_flow.type(x.type())
-    output = F.grid_sample(
-        x,
-        grid_flow,
-        mode=interpolation,
-        padding_mode=padding_mode,
-        align_corners=align_corners)
+    output = F.grid_sample(x, grid_flow, mode=interpolation, padding_mode=padding_mode, align_corners=align_corners)
     return output

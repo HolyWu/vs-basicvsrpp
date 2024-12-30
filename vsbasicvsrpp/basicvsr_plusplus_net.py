@@ -2,13 +2,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.ops import ModulatedDeformConv2d, modulated_deform_conv2d
 from mmengine.model import BaseModule
 from mmengine.model.weight_init import constant_init
+from mmengine.registry import MODELS
+from torchvision.ops import DeformConv2d, deform_conv2d
 
 from .basicvsr_net import ResidualBlocksWithInputConv, SPyNet
 from .flow_warp import flow_warp
-from .registry import MODELS
 from .upsample import PixelShufflePack
 
 
@@ -38,13 +38,15 @@ class BasicVSRPlusPlusNet(BaseModule):
             Default: False.
     """
 
-    def __init__(self,
-                 mid_channels=64,
-                 num_blocks=7,
-                 max_residue_magnitude=10,
-                 is_low_res_input=True,
-                 spynet_pretrained=None,
-                 cpu_cache=False):
+    def __init__(
+        self,
+        mid_channels=64,
+        num_blocks=7,
+        max_residue_magnitude=10,
+        is_low_res_input=True,
+        spynet_pretrained=None,
+        cpu_cache=False,
+    ):
 
         super().__init__()
         self.mid_channels = mid_channels
@@ -63,12 +65,13 @@ class BasicVSRPlusPlusNet(BaseModule):
                 nn.LeakyReLU(negative_slope=0.1, inplace=True),
                 nn.Conv2d(mid_channels, mid_channels, 3, 2, 1),
                 nn.LeakyReLU(negative_slope=0.1, inplace=True),
-                ResidualBlocksWithInputConv(mid_channels, mid_channels, 5))
+                ResidualBlocksWithInputConv(mid_channels, mid_channels, 5),
+            )
 
         # propagation branches
         self.deform_align = nn.ModuleDict()
         self.backbone = nn.ModuleDict()
-        modules = ['backward_1', 'forward_1', 'backward_2', 'forward_2']
+        modules = ["backward_1", "forward_1", "backward_2", "forward_2"]
         for i, module in enumerate(modules):
             self.deform_align[module] = SecondOrderDeformableAlignment(
                 2 * mid_channels,
@@ -76,21 +79,17 @@ class BasicVSRPlusPlusNet(BaseModule):
                 3,
                 padding=1,
                 deform_groups=16,
-                max_residue_magnitude=max_residue_magnitude)
-            self.backbone[module] = ResidualBlocksWithInputConv(
-                (2 + i) * mid_channels, mid_channels, num_blocks)
+                max_residue_magnitude=max_residue_magnitude,
+            )
+            self.backbone[module] = ResidualBlocksWithInputConv((2 + i) * mid_channels, mid_channels, num_blocks)
 
         # upsampling module
-        self.reconstruction = ResidualBlocksWithInputConv(
-            5 * mid_channels, mid_channels, 5)
-        self.upsample1 = PixelShufflePack(
-            mid_channels, mid_channels, 2, upsample_kernel=3)
-        self.upsample2 = PixelShufflePack(
-            mid_channels, 64, 2, upsample_kernel=3)
+        self.reconstruction = ResidualBlocksWithInputConv(5 * mid_channels, mid_channels, 5)
+        self.upsample1 = PixelShufflePack(mid_channels, mid_channels, 2, upsample_kernel=3)
+        self.upsample2 = PixelShufflePack(mid_channels, 64, 2, upsample_kernel=3)
         self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
         self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
-        self.img_upsample = nn.Upsample(
-            scale_factor=4, mode='bilinear', align_corners=False)
+        self.img_upsample = nn.Upsample(scale_factor=4, mode="bilinear", align_corners=False)
 
         # activation function
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -135,11 +134,7 @@ class BasicVSRPlusPlusNet(BaseModule):
         lqs_2 = lqs[:, 1:, :, :, :].reshape(-1, c, h, w)
 
         flows_backward = self.spynet(lqs_1, lqs_2).view(n, t - 1, 2, h, w)
-
-        if self.is_mirror_extended:  # flows_forward = flows_backward.flip(1)
-            flows_forward = None
-        else:
-            flows_forward = self.spynet(lqs_2, lqs_1).view(n, t - 1, 2, h, w)
+        flows_forward = self.spynet(lqs_2, lqs_1).view(n, t - 1, 2, h, w)
 
         if self.cpu_cache:
             flows_backward = flows_backward.cpu()
@@ -170,16 +165,16 @@ class BasicVSRPlusPlusNet(BaseModule):
         # flow_idx = range(-1, t)
         frame_idx = list(range(0, t + 1))
         flow_idx = list(range(-1, t))
-        mapping_idx = list(range(0, len(feats['spatial'])))
+        mapping_idx = list(range(0, len(feats["spatial"])))
         mapping_idx += mapping_idx[::-1]
 
-        if 'backward' in module_name:
+        if "backward" in module_name:
             frame_idx = frame_idx[::-1]
             flow_idx = frame_idx
 
         feat_prop = flows.new_zeros(n, self.mid_channels, h, w)
         for i, idx in enumerate(frame_idx):
-            feat_current = feats['spatial'][mapping_idx[idx]]
+            feat_current = feats["spatial"][mapping_idx[idx]]
             if self.cpu_cache:
                 feat_current = feat_current.cuda()
                 feat_prop = feat_prop.cuda()
@@ -205,21 +200,16 @@ class BasicVSRPlusPlusNet(BaseModule):
                     if self.cpu_cache:
                         flow_n2 = flow_n2.cuda()
 
-                    flow_n2 = flow_n1 + flow_warp(flow_n2,
-                                                  flow_n1.permute(0, 2, 3, 1))
+                    flow_n2 = flow_n1 + flow_warp(flow_n2, flow_n1.permute(0, 2, 3, 1))
                     cond_n2 = flow_warp(feat_n2, flow_n2.permute(0, 2, 3, 1))
 
                 # flow-guided deformable convolution
                 cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
                 feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
-                feat_prop = self.deform_align[module_name](feat_prop, cond,
-                                                           flow_n1, flow_n2)
+                feat_prop = self.deform_align[module_name](feat_prop, cond, flow_n1, flow_n2)
 
             # concatenate and residual blocks
-            feat = [feat_current] + [
-                feats[k][idx]
-                for k in feats if k not in ['spatial', module_name]
-            ] + [feat_prop]
+            feat = [feat_current] + [feats[k][idx] for k in feats if k not in ["spatial", module_name]] + [feat_prop]
             if self.cpu_cache:
                 feat = [f.cuda() for f in feat]
 
@@ -231,7 +221,7 @@ class BasicVSRPlusPlusNet(BaseModule):
                 feats[module_name][-1] = feats[module_name][-1].cpu()
                 torch.cuda.empty_cache()
 
-        if 'backward' in module_name:
+        if "backward" in module_name:
             feats[module_name] = feats[module_name][::-1]
 
         return feats
@@ -249,14 +239,14 @@ class BasicVSRPlusPlusNet(BaseModule):
         """
 
         outputs = []
-        num_outputs = len(feats['spatial'])
+        num_outputs = len(feats["spatial"])
 
         mapping_idx = list(range(0, num_outputs))
         mapping_idx += mapping_idx[::-1]
 
         for i in range(0, lqs.size(1)):
-            hr = [feats[k].pop(0) for k in feats if k != 'spatial']
-            hr.insert(0, feats['spatial'][mapping_idx[i]])
+            hr = [feats[k].pop(0) for k in feats if k != "spatial"]
+            hr.insert(0, feats["spatial"][mapping_idx[i]])
             hr = torch.cat(hr, dim=1)
             if self.cpu_cache:
                 hr = hr.cuda()
@@ -295,41 +285,38 @@ class BasicVSRPlusPlusNet(BaseModule):
         if self.is_low_res_input:
             lqs_downsample = lqs.clone()
         else:
-            lqs_downsample = F.interpolate(
-                lqs.view(-1, c, h, w), scale_factor=0.25,
-                mode='bicubic').view(n, t, c, h // 4, w // 4)
-
-        # check whether the input is an extended sequence
-        self.check_if_mirror_extended(lqs)
+            lqs_downsample = F.interpolate(lqs.view(-1, c, h, w), scale_factor=0.25, mode="bicubic").view(
+                n, t, c, h // 4, w // 4
+            )
 
         feats = {}
         # compute spatial features
         if self.cpu_cache:
-            feats['spatial'] = []
+            feats["spatial"] = []
             for i in range(0, t):
                 feat = self.feat_extract(lqs[:, i, :, :, :]).cpu()
-                feats['spatial'].append(feat)
+                feats["spatial"].append(feat)
                 torch.cuda.empty_cache()
         else:
             feats_ = self.feat_extract(lqs.view(-1, c, h, w))
             h, w = feats_.shape[2:]
             feats_ = feats_.view(n, t, -1, h, w)
-            feats['spatial'] = [feats_[:, i, :, :, :] for i in range(0, t)]
+            feats["spatial"] = [feats_[:, i, :, :, :] for i in range(0, t)]
 
         # compute optical flow using the low-res inputs
         assert lqs_downsample.size(3) >= 64 and lqs_downsample.size(4) >= 64, (
-            'The height and width of low-res inputs must be at least 64, '
-            f'but got {h} and {w}.')
+            "The height and width of low-res inputs must be at least 64, " f"but got {h} and {w}."
+        )
         flows_forward, flows_backward = self.compute_flow(lqs_downsample)
 
         # feature propagation
         for iter_ in [1, 2]:
-            for direction in ['backward', 'forward']:
-                module = f'{direction}_{iter_}'
+            for direction in ["backward", "forward"]:
+                module = f"{direction}_{iter_}"
 
                 feats[module] = []
 
-                if direction == 'backward':
+                if direction == "backward":
                     flows = flows_backward
                 elif flows_forward is not None:
                     flows = flows_forward
@@ -344,7 +331,7 @@ class BasicVSRPlusPlusNet(BaseModule):
         return self.upsample(lqs, feats)
 
 
-class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
+class SecondOrderDeformableAlignment(DeformConv2d):
     """Second-order deformable alignment module.
 
     Args:
@@ -363,7 +350,8 @@ class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
     """
 
     def __init__(self, *args, **kwargs):
-        self.max_residue_magnitude = kwargs.pop('max_residue_magnitude', 10)
+        self.deform_groups = kwargs.pop("deform_groups", 16)
+        self.max_residue_magnitude = kwargs.pop("max_residue_magnitude", 10)
 
         super(SecondOrderDeformableAlignment, self).__init__(*args, **kwargs)
 
@@ -390,21 +378,22 @@ class SecondOrderDeformableAlignment(ModulatedDeformConv2d):
         o1, o2, mask = torch.chunk(out, 3, dim=1)
 
         # offset
-        offset = self.max_residue_magnitude * torch.tanh(
-            torch.cat((o1, o2), dim=1))
+        offset = self.max_residue_magnitude * torch.tanh(torch.cat((o1, o2), dim=1))
         offset_1, offset_2 = torch.chunk(offset, 2, dim=1)
-        offset_1 = offset_1 + flow_1.flip(1).repeat(1,
-                                                    offset_1.size(1) // 2, 1,
-                                                    1)
-        offset_2 = offset_2 + flow_2.flip(1).repeat(1,
-                                                    offset_2.size(1) // 2, 1,
-                                                    1)
+        offset_1 = offset_1 + flow_1.flip(1).repeat(1, offset_1.size(1) // 2, 1, 1)
+        offset_2 = offset_2 + flow_2.flip(1).repeat(1, offset_2.size(1) // 2, 1, 1)
         offset = torch.cat([offset_1, offset_2], dim=1)
 
         # mask
         mask = torch.sigmoid(mask)
 
-        return modulated_deform_conv2d(x, offset, mask, self.weight, self.bias,
-                                       self.stride, self.padding,
-                                       self.dilation, self.groups,
-                                       self.deform_groups)
+        return deform_conv2d(
+            x,
+            offset,
+            self.weight,
+            self.bias,
+            self.stride,
+            self.padding,
+            self.dilation,
+            mask,
+        )

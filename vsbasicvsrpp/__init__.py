@@ -2,20 +2,25 @@ from __future__ import annotations
 
 import math
 import os
+import warnings
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 import vapoursynth as vs
+
+from . import hack_registry  # isort: split
+from mmengine.registry import MODELS
 from mmengine.runner import load_checkpoint
 
 from .basicvsr import BasicVSR
 from .basicvsr_plusplus_net import BasicVSRPlusPlusNet
-from .registry import MODELS
 
 __version__ = "2.1.0"
 
 os.environ["CUDA_MODULE_LOADING"] = "LAZY"
+
+warnings.filterwarnings("ignore", "The given NumPy array is not writable")
 
 model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "models")
 
@@ -23,7 +28,7 @@ model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "models")
 @torch.inference_mode()
 def basicvsrpp(
     clip: vs.VideoNode,
-    device_index: int | None = None,
+    device_index: int = 0,
     model: int = 1,
     length: int = 15,
     cpu_cache: bool = False,
@@ -47,7 +52,7 @@ def basicvsrpp(
                             7 = Video Deblurring (DVD)
                             8 = Video Deblurring (GoPro)
                             9 = Video Denoising
-    :param length:          Sequence length that the model processes.
+    :param length:          Length of sequence to process.
     :param cpu_cache:       Send the intermediate features to CPU.
                             This saves GPU memory, but slows down the inference speed.
     :param tile_w:          Tile width. As too large images result in the out of GPU memory issue, so this tile option
@@ -76,7 +81,7 @@ def basicvsrpp(
 
     torch.set_float32_matmul_precision("high")
 
-    fp16 = clip.format.bits_per_sample == 16
+    dtype = torch.half if clip.format.bits_per_sample == 16 else torch.float
 
     device = torch.device("cuda", device_index)
 
@@ -132,15 +137,6 @@ def basicvsrpp(
             num_blocks = 15
             is_low_res_input = False
 
-    if is_low_res_input:
-        min_res = 64
-        modulo = 1
-        scale = 4
-    else:
-        min_res = 256
-        modulo = 4
-        scale = 1
-
     model_path = os.path.join(model_dir, model_name)
     spynet_path = os.path.join(model_dir, "spynet_20210409-c6c1bd09.pth")
 
@@ -158,9 +154,16 @@ def basicvsrpp(
 
     module = MODELS.build(cfg)
     load_checkpoint(module, model_path, map_location="cpu", logger="silent")
-    module.eval().to(device)
-    if fp16:
-        module.half()
+    module.eval().to(device, dtype)
+
+    if is_low_res_input:
+        min_res = 64
+        modulo = 1
+        scale = 4
+    else:
+        min_res = 256
+        modulo = 4
+        scale = 1
 
     pad_w = math.ceil(max(clip.width, min_res) / modulo) * modulo
     pad_h = math.ceil(max(clip.height, min_res) / modulo) * modulo
@@ -183,33 +186,34 @@ def basicvsrpp(
             if tile_w > 0 and tile_h > 0:
                 output = tile_process(img, scale, tile_w, tile_h, tile_pad, device, min_res, modulo, module)
             else:
-                img = img.to(device).clamp(0.0, 1.0)
+                img = img.to(device, non_blocking=True).clamp(0.0, 1.0)
 
                 h, w = img.shape[3:]
-                mode = "reflect" if pad_w - w < w and pad_h - h < h else "replicate"
-                img = F.pad(img, (0, pad_w - w, 0, pad_h - h, 0, 0), mode)
+                if need_pad := pad_w - w > 0 or pad_h - h > 0:
+                    img = F.pad(img, (0, pad_w - w, 0, pad_h - h, 0, 0), "replicate")
 
                 output = module(img)
-                output = output[:, :, :, : h * scale, : w * scale]
+                if need_pad:
+                    output = output[:, :, :, : h * scale, : w * scale]
 
             output = output.squeeze(0).detach().cpu().numpy()
             for i in range(output.shape[0]):
-                cache[str(n + i)] = output[i, :, :, :]
+                cache[str(n + i)] = output[i]
 
         return ndarray_to_frame(cache[str(n)], f[1].copy())
 
     new_clip = clip.std.BlankClip(width=clip.width * scale, height=clip.height * scale, keep=True)
+    new_clip = new_clip.std.CopyFrameProps(clip)
     return new_clip.std.ModifyFrame([clip, new_clip], inference)
 
 
 def frame_to_tensor(frame: vs.VideoFrame) -> torch.Tensor:
-    array = np.stack([np.asarray(frame[plane]) for plane in range(frame.format.num_planes)])
-    return torch.from_numpy(array)
+    return torch.stack([torch.from_numpy(np.asarray(frame[plane])) for plane in range(frame.format.num_planes)])
 
 
 def ndarray_to_frame(array: np.ndarray, frame: vs.VideoFrame) -> vs.VideoFrame:
     for plane in range(frame.format.num_planes):
-        np.copyto(np.asarray(frame[plane]), array[plane, :, :])
+        np.copyto(np.asarray(frame[plane]), array[plane])
     return frame
 
 
@@ -257,17 +261,18 @@ def tile_process(
             input_tile_height = input_end_y - input_start_y
 
             input_tile = img[:, :, :, input_start_y_pad:input_end_y_pad, input_start_x_pad:input_end_x_pad]
-            input_tile = input_tile.to(device).clamp(0.0, 1.0)
+            input_tile = input_tile.to(device, non_blocking=True).clamp(0.0, 1.0)
 
             h, w = input_tile.shape[3:]
             pad_w = math.ceil(max(w, min_res) / modulo) * modulo
             pad_h = math.ceil(max(h, min_res) / modulo) * modulo
-            mode = "reflect" if pad_w - w < w and pad_h - h < h else "replicate"
-            input_tile = F.pad(input_tile, (0, pad_w - w, 0, pad_h - h, 0, 0), mode)
+            if need_pad := pad_w - w > 0 or pad_h - h > 0:
+                input_tile = F.pad(input_tile, (0, pad_w - w, 0, pad_h - h, 0, 0), "replicate")
 
             # process tile
             output_tile = module(input_tile)
-            output_tile = output_tile[:, :, :, : h * scale, : w * scale]
+            if need_pad:
+                output_tile = output_tile[:, :, :, : h * scale, : w * scale]
 
             # output tile area on total image
             output_start_x = input_start_x * scale

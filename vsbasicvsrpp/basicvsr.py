@@ -1,12 +1,10 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-import torch
-import torch.nn as nn
-
-from .registry import MODELS
+from mmengine.model import BaseModel
+from mmengine.registry import MODELS
 
 
 @MODELS.register_module()
-class BasicVSR(nn.Module):
+class BasicVSR(BaseModel):
     """BasicVSR model for video super-resolution.
 
     Note that this model is used for IconVSR.
@@ -24,9 +22,6 @@ class BasicVSR(nn.Module):
 
         # generator
         self.generator = MODELS.build(generator)
-
-        # count training steps
-        self.register_buffer('step_counter', torch.zeros(1))
 
     def forward(self, inputs):
         """Forward tensor. Returns result of simple forward."""

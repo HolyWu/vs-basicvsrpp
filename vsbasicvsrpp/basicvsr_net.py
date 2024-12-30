@@ -2,11 +2,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import ConvModule
-from mmengine import MMLogger
 from mmengine.model import BaseModule
 from mmengine.runner import load_checkpoint
 
+from .conv_module import ConvModule
 from .flow_warp import flow_warp
 from .model_utils import make_layer
 from .sr_backbone import ResidualBlockNoBN
@@ -32,9 +31,7 @@ class ResidualBlocksWithInputConv(BaseModule):
         main.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
 
         # residual blocks
-        main.append(
-            make_layer(
-                ResidualBlockNoBN, num_blocks, mid_channels=out_channels))
+        main.append(make_layer(ResidualBlockNoBN, num_blocks, mid_channels=out_channels))
 
         self.main = nn.Sequential(*main)
 
@@ -67,21 +64,15 @@ class SPyNet(BaseModule):
     def __init__(self, pretrained):
         super().__init__()
 
-        self.basic_module = nn.ModuleList(
-            [SPyNetBasicModule() for _ in range(6)])
+        self.basic_module = nn.ModuleList([SPyNetBasicModule() for _ in range(6)])
 
         if isinstance(pretrained, str):
-            load_checkpoint(self, pretrained, strict=True, logger="silent")
+            load_checkpoint(self, pretrained, map_location="cpu", strict=True, logger="silent")
         elif pretrained is not None:
-            raise TypeError('[pretrained] should be str or None, '
-                            f'but got {type(pretrained)}.')
+            raise TypeError("[pretrained] should be str or None, " f"but got {type(pretrained)}.")
 
-        self.register_buffer(
-            'mean',
-            torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
-        self.register_buffer(
-            'std',
-            torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+        self.register_buffer("mean", torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
     def compute_flow(self, ref, supp):
         """Compute flow from ref to supp.
@@ -104,18 +95,8 @@ class SPyNet(BaseModule):
 
         # generate downsampled frames
         for level in range(5):
-            ref.append(
-                F.avg_pool2d(
-                    input=ref[-1],
-                    kernel_size=2,
-                    stride=2,
-                    count_include_pad=False))
-            supp.append(
-                F.avg_pool2d(
-                    input=supp[-1],
-                    kernel_size=2,
-                    stride=2,
-                    count_include_pad=False))
+            ref.append(F.avg_pool2d(input=ref[-1], kernel_size=2, stride=2, count_include_pad=False))
+            supp.append(F.avg_pool2d(input=supp[-1], kernel_size=2, stride=2, count_include_pad=False))
         ref = ref[::-1]
         supp = supp[::-1]
 
@@ -125,21 +106,14 @@ class SPyNet(BaseModule):
             if level == 0:
                 flow_up = flow
             else:
-                flow_up = F.interpolate(
-                    input=flow,
-                    scale_factor=2,
-                    mode='bilinear',
-                    align_corners=True) * 2.0
+                flow_up = F.interpolate(input=flow, scale_factor=2, mode="bilinear", align_corners=True) * 2.0
 
             # add the residue to the upsampled flow
             flow = flow_up + self.basic_module[level](
-                torch.cat([
-                    ref[level],
-                    flow_warp(
-                        supp[level],
-                        flow_up.permute(0, 2, 3, 1),
-                        padding_mode='border'), flow_up
-                ], 1))
+                torch.cat(
+                    [ref[level], flow_warp(supp[level], flow_up.permute(0, 2, 3, 1), padding_mode="border"), flow_up], 1
+                )
+            )
 
         return flow
 
@@ -160,20 +134,11 @@ class SPyNet(BaseModule):
         h, w = ref.shape[2:4]
         w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
         h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
-        ref = F.interpolate(
-            input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)
-        supp = F.interpolate(
-            input=supp,
-            size=(h_up, w_up),
-            mode='bilinear',
-            align_corners=False)
+        ref = F.interpolate(input=ref, size=(h_up, w_up), mode="bilinear", align_corners=False)
+        supp = F.interpolate(input=supp, size=(h_up, w_up), mode="bilinear", align_corners=False)
 
         # compute flow, and resize back to the original resolution
-        flow = F.interpolate(
-            input=self.compute_flow(ref, supp),
-            size=(h, w),
-            mode='bilinear',
-            align_corners=False)
+        flow = F.interpolate(input=self.compute_flow(ref, supp), size=(h, w), mode="bilinear", align_corners=False)
 
         # adjust the flow values
         flow[:, 0, :, :] *= float(w) / float(w_up)
@@ -200,7 +165,8 @@ class SPyNetBasicModule(BaseModule):
                 stride=1,
                 padding=3,
                 norm_cfg=None,
-                act_cfg=dict(type='ReLU')),
+                act_cfg=dict(type="ReLU"),
+            ),
             ConvModule(
                 in_channels=32,
                 out_channels=64,
@@ -208,7 +174,8 @@ class SPyNetBasicModule(BaseModule):
                 stride=1,
                 padding=3,
                 norm_cfg=None,
-                act_cfg=dict(type='ReLU')),
+                act_cfg=dict(type="ReLU"),
+            ),
             ConvModule(
                 in_channels=64,
                 out_channels=32,
@@ -216,7 +183,8 @@ class SPyNetBasicModule(BaseModule):
                 stride=1,
                 padding=3,
                 norm_cfg=None,
-                act_cfg=dict(type='ReLU')),
+                act_cfg=dict(type="ReLU"),
+            ),
             ConvModule(
                 in_channels=32,
                 out_channels=16,
@@ -224,15 +192,10 @@ class SPyNetBasicModule(BaseModule):
                 stride=1,
                 padding=3,
                 norm_cfg=None,
-                act_cfg=dict(type='ReLU')),
-            ConvModule(
-                in_channels=16,
-                out_channels=2,
-                kernel_size=7,
-                stride=1,
-                padding=3,
-                norm_cfg=None,
-                act_cfg=None))
+                act_cfg=dict(type="ReLU"),
+            ),
+            ConvModule(in_channels=16, out_channels=2, kernel_size=7, stride=1, padding=3, norm_cfg=None, act_cfg=None),
+        )
 
     def forward(self, tensor_input):
         """
