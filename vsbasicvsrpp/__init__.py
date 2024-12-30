@@ -32,8 +32,7 @@ def basicvsrpp(
     model: int = 1,
     length: int = 15,
     cpu_cache: bool = False,
-    tile_w: int = 0,
-    tile_h: int = 0,
+    tile: list[int] = [0, 0],
     tile_pad: int = 16,
 ) -> vs.VideoNode:
     """Improving Video Super-Resolution with Enhanced Propagation and Alignment
@@ -55,10 +54,9 @@ def basicvsrpp(
     :param length:          Length of sequence to process.
     :param cpu_cache:       Send the intermediate features to CPU.
                             This saves GPU memory, but slows down the inference speed.
-    :param tile_w:          Tile width. As too large images result in the out of GPU memory issue, so this tile option
-                            will first crop input images into tiles, and then process each of them. Finally, they will
-                            be merged into one image. 0 denotes for do not use tile.
-    :param tile_h:          Tile height.
+    :param tile:            Tile width and height. As too large images result in the out of GPU memory issue, so this
+                            tile option will first crop input images into tiles, and then process each of them. Finally,
+                            they will be merged into one image. 0 denotes for do not use tile.
     :param tile_pad:        Pad size for each tile, to remove border artifacts.
     """
     if not isinstance(clip, vs.VideoNode):
@@ -75,6 +73,9 @@ def basicvsrpp(
 
     if length < 1:
         raise vs.Error("basicvsrpp: length must be at least 1")
+
+    if not isinstance(tile, list) or len(tile) != 2:
+        raise vs.Error("basicvsrpp: tile must be a list with 2 items")
 
     if os.path.getsize(os.path.join(model_dir, "basicvsr_plusplus_c64n7_8x1_600k_reds4_20210217-db622b2f.pth")) == 0:
         raise vs.Error("basicvsrpp: model files have not been downloaded. run 'python -m vsbasicvsrpp' first")
@@ -165,8 +166,12 @@ def basicvsrpp(
         modulo = 4
         scale = 1
 
-    pad_w = math.ceil(max(clip.width, min_res) / modulo) * modulo
-    pad_h = math.ceil(max(clip.height, min_res) / modulo) * modulo
+    if all(t > 0 for t in tile):
+        pad_w = math.ceil(max(tile[0] + 2 * tile_pad, min_res) / modulo) * modulo
+        pad_h = math.ceil(max(tile[1] + 2 * tile_pad, min_res) / modulo) * modulo
+    else:
+        pad_w = math.ceil(max(clip.width, min_res) / modulo) * modulo
+        pad_h = math.ceil(max(clip.height, min_res) / modulo) * modulo
 
     cache = {}
 
@@ -183,8 +188,8 @@ def basicvsrpp(
 
             img = torch.stack(img).unsqueeze(0)
 
-            if tile_w > 0 and tile_h > 0:
-                output = tile_process(img, scale, tile_w, tile_h, tile_pad, device, min_res, modulo, module)
+            if all(t > 0 for t in tile):
+                output = tile_process(img, scale, tile, tile_pad, device, pad_w, pad_h, module)
             else:
                 img = img.to(device, non_blocking=True).clamp(0.0, 1.0)
 
@@ -220,12 +225,11 @@ def ndarray_to_frame(array: np.ndarray, frame: vs.VideoFrame) -> vs.VideoFrame:
 def tile_process(
     img: torch.Tensor,
     scale: int,
-    tile_w: int,
-    tile_h: int,
+    tile: list[int],
     tile_pad: int,
     device: torch.device,
-    min_res: int,
-    modulo: int,
+    pad_w: int,
+    pad_h: int,
     module: torch.nn.Module,
 ) -> torch.Tensor:
     batch, length, channel, height, width = img.shape
@@ -234,21 +238,21 @@ def tile_process(
     # start with black image
     output = img.new_zeros(output_shape)
 
-    tiles_x = math.ceil(width / tile_w)
-    tiles_y = math.ceil(height / tile_h)
+    tiles_x = math.ceil(width / tile[0])
+    tiles_y = math.ceil(height / tile[1])
 
     # loop over all tiles
     for y in range(tiles_y):
         for x in range(tiles_x):
             # extract tile from input image
-            ofs_x = x * tile_w
-            ofs_y = y * tile_h
+            ofs_x = x * tile[0]
+            ofs_y = y * tile[1]
 
             # input tile area on total image
             input_start_x = ofs_x
-            input_end_x = min(ofs_x + tile_w, width)
+            input_end_x = min(ofs_x + tile[0], width)
             input_start_y = ofs_y
-            input_end_y = min(ofs_y + tile_h, height)
+            input_end_y = min(ofs_y + tile[1], height)
 
             # input tile area on total image with padding
             input_start_x_pad = max(input_start_x - tile_pad, 0)
@@ -264,8 +268,6 @@ def tile_process(
             input_tile = input_tile.to(device, non_blocking=True).clamp(0.0, 1.0)
 
             h, w = input_tile.shape[3:]
-            pad_w = math.ceil(max(w, min_res) / modulo) * modulo
-            pad_h = math.ceil(max(h, min_res) / modulo) * modulo
             if need_pad := pad_w - w > 0 or pad_h - h > 0:
                 input_tile = F.pad(input_tile, (0, pad_w - w, 0, pad_h - h, 0, 0), "replicate")
 
