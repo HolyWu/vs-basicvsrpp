@@ -8,25 +8,32 @@ version = "2.1.0"
 description = "BasicVSR++ function for VapourSynth"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {file = "LICENSE"}
-authors = [{name = "HolyWu", email = "holywu@gmail.com"}]
-keywords = ["BasicVSR++", "VapourSynth"]
+license-files = { paths = ["LICENSE"] }
+authors = [
+  { name = "HolyWu", email = "holywu@gmail.com" },
+]
+keywords = [
+  "BasicVSR++",
+  "PyTorch",
+  "VapourSynth",
+]
 classifiers = [
+  "Environment :: GPU :: NVIDIA CUDA",
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3 :: Only",
-  "Topic :: Multimedia :: Video"
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Video",
 ]
 dependencies = [
   "mmengine",
-  "numpy>=1.24.3",
-  "requests>=2.30.0",
-  "torch>=2.0.1",
-  "torchvision>=0.15.2",
-  "tqdm>=4.65.0",
-  "VapourSynth>=60"
+  "numpy",
+  "requests",
+  "torch>=2.5.1",
+  "torchvision>=0.20.1",
+  "tqdm",
+  "VapourSynth>=66",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/HolyWu/vs-basicvsrpp"
-"Bug Tracker" = "https://github.com/HolyWu/vs-basicvsrpp/issues"
+Homepage = "https://github.com/HolyWu/vs-basicvsrpp"
+Issues = "https://github.com/HolyWu/vs-basicvsrpp/issues"
