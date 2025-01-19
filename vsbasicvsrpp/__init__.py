@@ -17,7 +17,7 @@ from .__main__ import download_model
 from .basicvsr import BasicVSR
 from .basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
-__version__ = "2.1.0"
+__version__ = "3.0.0"
 
 os.environ["CUDA_MODULE_LOADING"] = "LAZY"
 
