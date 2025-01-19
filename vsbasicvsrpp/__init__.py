@@ -13,6 +13,7 @@ from . import hack_registry  # isort: split
 from mmengine.registry import MODELS
 from mmengine.runner import load_checkpoint
 
+from .__main__ import download_model
 from .basicvsr import BasicVSR
 from .basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
@@ -30,6 +31,7 @@ def basicvsrpp(
     clip: vs.VideoNode,
     device_index: int = 0,
     model: int = 1,
+    auto_download: bool = False,
     length: int = 15,
     cpu_cache: bool = False,
     tile: list[int] = [0, 0],
@@ -51,6 +53,7 @@ def basicvsrpp(
                             7 = Video Deblurring (DVD)
                             8 = Video Deblurring (GoPro)
                             9 = Video Denoising
+    :param auto_download:   Automatically download the specified model if the file has not been downloaded.
     :param length:          Length of sequence to process.
     :param cpu_cache:       Send the intermediate features to CPU.
                             This saves GPU memory, but slows down the inference speed.
@@ -76,9 +79,6 @@ def basicvsrpp(
 
     if not isinstance(tile, list) or len(tile) != 2:
         raise vs.Error("basicvsrpp: tile must be a list with 2 items")
-
-    if os.path.getsize(os.path.join(model_dir, "basicvsr_plusplus_c64n7_8x1_600k_reds4_20210217-db622b2f.pth")) == 0:
-        raise vs.Error("basicvsrpp: model files have not been downloaded. run 'python -m vsbasicvsrpp' first")
 
     torch.set_float32_matmul_precision("high")
 
@@ -140,6 +140,18 @@ def basicvsrpp(
 
     model_path = os.path.join(model_dir, model_name)
     spynet_path = os.path.join(model_dir, "spynet_20210409-c6c1bd09.pth")
+
+    if os.path.getsize(model_path) == 0:
+        if auto_download:
+            download_model(f"https://github.com/HolyWu/vs-basicvsrpp/releases/download/model/{model_name}")
+        else:
+            raise vs.Error(
+                "basicvsrpp: model file has not been downloaded. run `python -m vsbasicvsrpp` to download all "
+                "models, or set `auto_download=True` to only download the specified model"
+            )
+
+    if os.path.getsize(spynet_path) == 0:
+        download_model("https://github.com/HolyWu/vs-basicvsrpp/releases/download/model/spynet_20210409-c6c1bd09.pth")
 
     cfg = dict(
         type="BasicVSR",
